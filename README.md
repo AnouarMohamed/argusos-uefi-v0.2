@@ -1,8 +1,8 @@
-# ArgusOS UEFI Study Monitor v0.2
+# ArgusOS UEFI Study Monitor v0.3
 
 A deliberately small x86-64 UEFI bare-metal study environment.
 
-This is the practical successor to the 16-bit BIOS ArgusOS shell. It boots on modern UEFI firmware as `EFI/BOOT/BOOTX64.EFI`, does not use libc or a host operating system, and keeps UEFI Boot Services active so keyboard and console input remain reliable on modern machines while you study the lower layers.
+This is the practical successor to the 16-bit BIOS ArgusOS shell. It boots on modern UEFI firmware as `EFI/BOOT/BOOTX64.EFI`, does not use libc or a host operating system, and now owns its screen output through the UEFI GOP linear framebuffer. UEFI Boot Services remain active for keyboard input while the lower layers are developed incrementally.
 
 ## What is real here?
 
@@ -12,10 +12,12 @@ This is the practical successor to the 16-bit BIOS ArgusOS shell. It boots on mo
 - `mem`/`memmap` inspect the actual UEFI physical memory map.
 - `reboot` and `shutdown` invoke firmware runtime services.
 - The shell, parsing, integer formatting, and console logic have no libc dependency.
+- GOP is located at boot and Argus writes glyph pixels directly into the framebuffer.
+- The framebuffer console implements clear, cursor movement, backspace, wrapping, and scrolling itself.
 
 ## What is *not* a full kernel yet?
 
-This stage intentionally has **not called `ExitBootServices()`**. It still relies on UEFI for keyboard and text output. That is a feature for the learning progression: if you exit firmware services immediately on a modern laptop, you need to supply your own framebuffer terminal and keyboard stack (often USB HID/xHCI), which is a much larger project.
+This stage intentionally has **not called `ExitBootServices()`**. Text output no longer depends on the UEFI text console when GOP is available, but keyboard input still uses UEFI. This keeps the project usable while the interrupt and USB/HID layers are still missing.
 
 ## Build
 
@@ -70,6 +72,7 @@ time
 mem
 memmap
 color 14
+video
 echo hello
 reboot
 shutdown
@@ -80,14 +83,17 @@ exit
 
 ```text
 src/efi.h     minimal UEFI ABI/types/protocol structures
-src/main.c    shell + console + UEFI memory/time/runtime interaction
-src/cpu.S     handwritten x86-64 CPUID and RDTSC routines
-Makefile      freestanding PE/COFF build
+src/main.c      shell + UEFI memory/time/runtime interaction
+src/gop.c       GOP discovery and raw framebuffer pixel operations
+src/console.c   Argus framebuffer terminal + UEFI text fallback
+src/font5x7.c   tiny built-in 5x7 terminal font
+src/cpu.S       handwritten x86-64 CPUID and RDTSC routines
+Makefile        freestanding PE/COFF build
 ```
 
 ## Study progression
 
-### Stage A — current version
+### Stage A — completed in v0.2
 Learn:
 
 - Microsoft x64 / UEFI calling convention
@@ -96,16 +102,17 @@ Learn:
 - firmware memory descriptors
 - freestanding C/assembly interoperability
 
-### Stage B — own framebuffer terminal
-Use UEFI GOP only during startup, obtain the framebuffer address, then implement:
+### Stage B — current v0.3: own framebuffer terminal
+Implemented:
 
-- pixel writes
-- bitmap font rendering
-- cursor
+- GOP protocol discovery
+- direct linear-framebuffer pixel writes
+- built-in bitmap font rendering
+- cursor/backspace/wrapping
 - scrolling
-- `printf`-like formatting you write yourself
+- UEFI text-console fallback if GOP is unavailable
 
-At this point screen output no longer needs `ConOut`.
+The next useful improvement is a richer font and formatted-output layer.
 
 ### Stage C — memory ownership
 Implement:

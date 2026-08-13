@@ -9,3 +9,6 @@ EFI/BOOT/
 .vscode/
 .DS_Store
 Thumbs.db
+EFI/BOOT/BOOTX64.EFI
+*.img
+*.qcow2

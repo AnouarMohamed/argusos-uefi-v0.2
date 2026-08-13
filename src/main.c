@@ -1,7 +1,8 @@
 #include "efi.h"
+#include "console.h"
+#include "gop.h"
 
 static EFI_SYSTEM_TABLE *ST;
-static EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *OUT;
 static EFI_SIMPLE_TEXT_INPUT_PROTOCOL *IN;
 
 static unsigned char memory_map_buffer[131072];
@@ -11,29 +12,11 @@ extern void cpu_vendor(char out[13]);
 extern uint64_t cpu_read_tsc(void);
 extern void cpu_cpuid1(uint32_t *ecx_out, uint32_t *edx_out);
 
-static void print16(CHAR16 *s) {
-    OUT->OutputString(OUT, s);
-}
+static void print16(CHAR16 *s) { console_write16(s); }
 
-static void print(const char *s) {
-    CHAR16 tmp[2];
-    tmp[1] = 0;
-    while (*s) {
-        char c = *s++;
-        if (c == '\n') {
-            tmp[0] = '\r'; OUT->OutputString(OUT, tmp);
-            tmp[0] = '\n'; OUT->OutputString(OUT, tmp);
-        } else {
-            tmp[0] = (CHAR16)(unsigned char)c;
-            OUT->OutputString(OUT, tmp);
-        }
-    }
-}
+static void print(const char *s) { console_write(s); }
 
-static void putc_ascii(char c) {
-    CHAR16 tmp[2] = {(CHAR16)(unsigned char)c, 0};
-    OUT->OutputString(OUT, tmp);
-}
+static void putc_ascii(char c) { console_putc(c); }
 
 static int streq(const char *a, const char *b) {
     while (*a && *b && *a == *b) { ++a; ++b; }
@@ -235,12 +218,36 @@ static void cmd_cpu(void) {
     print("\n");
 }
 
+static const char *pixel_format_name(EFI_GRAPHICS_PIXEL_FORMAT f) {
+    switch (f) {
+        case PixelRedGreenBlueReserved8BitPerColor: return "RGBR8";
+        case PixelBlueGreenRedReserved8BitPerColor: return "BGRR8";
+        case PixelBitMask: return "BITMASK";
+        case PixelBltOnly: return "BLT-ONLY";
+        default: return "UNKNOWN";
+    }
+}
+
+static void cmd_video(void) {
+    if (!console_uses_framebuffer()) {
+        print("GOP linear framebuffer unavailable; using UEFI text fallback.\n");
+        return;
+    }
+    const argus_gop_t *g = gop_info();
+    print("Resolution: "); print_dec_u64(g->width); putc_ascii('x'); print_dec_u64(g->height); print("\n");
+    print("Pixels/scanline: "); print_dec_u64(g->pitch_pixels); print("\n");
+    print("Pixel format: "); print(pixel_format_name(g->format)); print("\n");
+    print("Framebuffer: 0x"); print_hex_u64(g->fb_base, 16); print("\n");
+    print("Framebuffer bytes: "); print_dec_u64(g->fb_size); print("\n");
+}
+
 static void help(void) {
     print("\nCommands:\n");
     print("  help       command list\n");
     print("  about      what this stage is\n");
-    print("  clear      clear UEFI console\n");
+    print("  clear      clear Argus console\n");
     print("  firmware   firmware vendor/revision\n");
+    print("  video      framebuffer/GOP information\n");
     print("  cpu        CPUID vendor + feature bits\n");
     print("  tsc        read x86 RDTSC counter\n");
     print("  time       firmware real-time clock\n");
@@ -264,13 +271,15 @@ static void about(void) {
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
     (void)image;
     ST = system_table;
-    OUT = ST->ConOut;
     IN = ST->ConIn;
 
-    OUT->SetAttribute(OUT, EFI_TEXT_LIGHTGREEN);
-    OUT->ClearScreen(OUT);
-    print("ArgusOS UEFI Study Monitor v0.2\n");
-    print("Booted as x86-64 UEFI code. Type 'help'.\n\n");
+    console_init(ST);
+    console_set_color(EFI_TEXT_LIGHTGREEN);
+    console_clear();
+    print("ArgusOS UEFI Study Monitor v0.3\n");
+    print(console_uses_framebuffer()
+        ? "Argus framebuffer console online. Type 'help'.\n\n"
+        : "GOP unavailable; UEFI text fallback active. Type 'help'.\n\n");
 
     for (;;) {
         print("argus64> ");
@@ -280,12 +289,13 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
         if (!linebuf[0]) continue;
         if (streq(linebuf, "help")) help();
         else if (streq(linebuf, "about")) about();
-        else if (streq(linebuf, "clear")) OUT->ClearScreen(OUT);
+        else if (streq(linebuf, "clear")) console_clear();
         else if (streq(linebuf, "firmware")) {
             print("Firmware: ");
             print16(ST->FirmwareVendor);
             print("\nRevision: 0x"); print_hex_u64(ST->FirmwareRevision, 8); print("\n");
         }
+        else if (streq(linebuf, "video")) cmd_video();
         else if (streq(linebuf, "cpu")) cmd_cpu();
         else if (streq(linebuf, "tsc")) {
             print("TSC: 0x"); print_hex_u64(cpu_read_tsc(), 16); print("\n");
@@ -297,7 +307,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
         else if (starts_with(linebuf, "color ")) {
             uint32_t c;
             if (parse_u32(linebuf + 6, &c) && c <= 15)
-                OUT->SetAttribute(OUT, c);
+                console_set_color(c);
             else
                 print("usage: color 0..15\n");
         }
