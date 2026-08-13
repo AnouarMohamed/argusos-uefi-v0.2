@@ -77,6 +77,8 @@ jobs:
           cp ./artifacts/build/BOOTX64.EFI ./EFI/BOOT/BOOTX64.EFI
           truncate -s 64M efi-test.img
           mkfs.fat -F32 efi-test.img
+          mmd -i efi-test.img ::/EFI
+          mmd -i efi-test.img ::/EFI/BOOT
           mcopy -i efi-test.img ./EFI/BOOT/BOOTX64.EFI ::/EFI/BOOT/BOOTX64.EFI
 
       - name: Boot in QEMU with OVMF
