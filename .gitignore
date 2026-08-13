@@ -1,0 +1,11 @@
+# Build artifacts
+build/
+EFI/BOOT/
+*.efi
+*.obj
+*.o
+
+# Editor / OS noise
+.vscode/
+.DS_Store
+Thumbs.db
