@@ -1,0 +1,37 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang lld binutils
+
+      - name: Build EFI image
+        run: |
+          make clean
+          make
+
+      - name: Build USB tree
+        run: |
+          make usb-tree
+
+      - name: Publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/BOOTX64.EFI
+            EFI/BOOT/BOOTX64.EFI
+          generate_release_notes: true
