@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+jobs:
+  build:
+    name: Build EFI image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang lld binutils
+
+      - name: Build project
+        run: |
+          make clean
+          make
+
+      - name: Validate output artifact
+        run: |
+          test -s build/BOOTX64.EFI
+          file build/BOOTX64.EFI
+          ls -l build/BOOTX64.EFI
+
+      - name: Build USB tree
+        run: |
+          make usb-tree
+          test -s EFI/BOOT/BOOTX64.EFI
+          ls -l EFI/BOOT/BOOTX64.EFI
+
+      - name: Upload EFI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: argusos-uefi-efi
+          path: |
+            build/BOOTX64.EFI
+            EFI/BOOT/BOOTX64.EFI
+          if-no-files-found: error
