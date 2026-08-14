@@ -73,10 +73,12 @@ int acpi_init(const boot_info_t *boot_info, acpi_info_t *info) {
     info->io_apic_address = 0;
     info->io_apic_gsi_base = 0;
     info->keyboard_gsi = 1u;
+    info->mouse_gsi = 12u;
     info->enabled_cpu_count = 0;
     info->interrupt_override_count = 0;
     info->madt_flags = 0;
     info->keyboard_flags = 0;
+    info->mouse_flags = 0;
 
     if (!boot_info || !boot_info->acpi_rsdp) return 0;
     const rsdp_t *rsdp = (const rsdp_t *)boot_info->acpi_rsdp;
@@ -109,11 +111,17 @@ int acpi_init(const boot_info_t *boot_info, acpi_info_t *info) {
                 *(const uint32_t *)(const void *)(entry + 8u);
         } else if (type == 2u && length >= 10u) {
             ++info->interrupt_override_count;
-            if (entry[2] == 0u && entry[3] == 1u) {
-                info->keyboard_gsi =
-                    *(const uint32_t *)(const void *)(entry + 4u);
-                info->keyboard_flags =
-                    *(const uint16_t *)(const void *)(entry + 8u);
+            if (entry[2] == 0u) {
+                uint32_t source = entry[3];
+                uint32_t gsi = *(const uint32_t *)(const void *)(entry + 4u);
+                uint16_t flags = *(const uint16_t *)(const void *)(entry + 8u);
+                if (source == 1u) {
+                    info->keyboard_gsi = gsi;
+                    info->keyboard_flags = flags;
+                } else if (source == 12u) {
+                    info->mouse_gsi = gsi;
+                    info->mouse_flags = flags;
+                }
             }
         } else if (type == 5u && length >= 12u) {
             info->local_apic_address =

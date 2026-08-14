@@ -1,4 +1,4 @@
-# Argus 9OS desktop prototype v0.12
+# ArgusOS desktop prototype v0.12
 
 ArgusOS v0.12 adds the first graphical desktop slice. It is a static,
 kernel-owned scene around the existing native shell, not a window manager,
@@ -52,6 +52,5 @@ tree without inheriting kernel privileges.
 - desktop icons are visual landmarks, not launch targets
 - the layout targets the current GOP resolution and scales at one or two integer pixels
 
-The next UI milestone should add a PS/2 mouse packet decoder, software cursor,
-hit testing, and draggable terminal-frame geometry while keeping the shell and
-serial fallback fully usable.
+That next milestone is completed in v0.13 and documented in
+`docs/pointer-ui-v0.13.md`.

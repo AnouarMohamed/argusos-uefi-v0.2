@@ -102,6 +102,11 @@ uint32_t gop_rgb(uint8_t r, uint8_t g, uint8_t b) {
     }
 }
 
+uint32_t gop_getpixel(uint32_t x, uint32_t y) {
+    if (!G.usable || x >= G.width || y >= G.height) return 0;
+    return G.fb[(uint64_t)y * G.pitch_pixels + x];
+}
+
 void gop_putpixel(uint32_t x, uint32_t y, uint32_t packed) {
     if (!G.usable || x >= G.width || y >= G.height) return;
     G.fb[(uint64_t)y * G.pitch_pixels + x] = packed;
@@ -153,4 +158,39 @@ void gop_scroll_rect_up(
         for (uint32_t xx = 0; xx < w; ++xx) dst[xx] = src[xx];
     }
     gop_fill_rect(x, y + rows, w, pixels, fill_color);
+}
+
+int gop_move_rect(
+    uint32_t source_x,
+    uint32_t source_y,
+    uint32_t destination_x,
+    uint32_t destination_y,
+    uint32_t width,
+    uint32_t height
+) {
+    if (!G.usable || !width || !height ||
+        source_x >= G.width || source_y >= G.height ||
+        destination_x >= G.width || destination_y >= G.height ||
+        width > G.width - source_x || height > G.height - source_y ||
+        width > G.width - destination_x || height > G.height - destination_y)
+        return 0;
+    if (source_x == destination_x && source_y == destination_y) return 1;
+
+    int reverse_y = destination_y > source_y;
+    for (uint32_t row = 0; row < height; ++row) {
+        uint32_t offset_y = reverse_y ? height - 1u - row : row;
+        volatile uint32_t *source =
+            G.fb + (uint64_t)(source_y + offset_y) * G.pitch_pixels + source_x;
+        volatile uint32_t *destination =
+            G.fb + (uint64_t)(destination_y + offset_y) * G.pitch_pixels + destination_x;
+
+        if (destination_y == source_y && destination_x > source_x) {
+            for (uint32_t column = width; column > 0u; --column)
+                destination[column - 1u] = source[column - 1u];
+        } else {
+            for (uint32_t column = 0; column < width; ++column)
+                destination[column] = source[column];
+        }
+    }
+    return 1;
 }

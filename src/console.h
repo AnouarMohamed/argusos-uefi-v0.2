@@ -23,5 +23,6 @@ int console_set_region(
     uint8_t background_g,
     uint8_t background_b
 );
+int console_move_region(uint32_t x, uint32_t y);
 
 #endif

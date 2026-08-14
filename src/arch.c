@@ -101,7 +101,8 @@ int arch_init(void) {
         set_idt_gate(vector, isr_stub_table[vector], vector == 8u ? 1u : 0u);
     set_idt_gate(ARGUS_APIC_TIMER_VECTOR, isr_stub_table[32], 0);
     set_idt_gate(ARGUS_PS2_KEYBOARD_VECTOR, isr_stub_table[33], 0);
-    set_idt_gate(ARGUS_APIC_SPURIOUS_VECTOR, isr_stub_table[34], 0);
+    set_idt_gate(ARGUS_PS2_MOUSE_VECTOR, isr_stub_table[34], 0);
+    set_idt_gate(ARGUS_APIC_SPURIOUS_VECTOR, isr_stub_table[35], 0);
 
     descriptor_table_pointer_t idtr = {
         (uint16_t)(sizeof(idt) - 1u),

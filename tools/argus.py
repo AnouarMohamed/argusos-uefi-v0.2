@@ -46,6 +46,7 @@ BOOT_MARKERS = (
     b"APIC_TIMER_TICK",
     b"DESKTOP_UI_ONLINE",
     b"PS2_IRQ_ONLINE",
+    b"PS2_MOUSE_IRQ_ONLINE",
     b"KERNEL_SHELL_READY",
 )
 SHELL_PROBES = (
@@ -308,6 +309,21 @@ class QmpClient:
             {"command-line": f"sendkey {key}"},
         )
 
+    def move_pointer(self, dx: int, dy: int) -> None:
+        events: list[dict[str, object]] = []
+        if dx:
+            events.append({"type": "rel", "data": {"axis": "x", "value": dx}})
+        if dy:
+            events.append({"type": "rel", "data": {"axis": "y", "value": dy}})
+        if events:
+            self.execute("input-send-event", {"events": events})
+
+    def pointer_button(self, button: str, down: bool) -> None:
+        self.execute(
+            "input-send-event",
+            {"events": [{"type": "btn", "data": {"button": button, "down": down}}]},
+        )
+
     def close(self) -> None:
         self.stream.close()
         self.connection.close()
@@ -390,6 +406,24 @@ def run_smoke(args: argparse.Namespace) -> None:
         qmp.send_key("ret")
         session.expect(b"PS2_IRQ_INPUT_OK", args.timeout)
         session.expect(b"argus-kernel> ", args.timeout)
+
+        qmp.move_pointer(0, -280)
+        time.sleep(0.05)
+        qmp.pointer_button("left", True)
+        time.sleep(0.05)
+        qmp.move_pointer(120, 60)
+        time.sleep(0.05)
+        qmp.pointer_button("left", False)
+        time.sleep(0.05)
+        session.send(b"ui\r")
+        session.expect(b"DESKTOP_DRAG_OK", args.timeout)
+        session.expect(b"argus-kernel> ", args.timeout)
+
+        args.drag_screenshot.parent.mkdir(parents=True, exist_ok=True)
+        qmp.execute("screendump", {"filename": str(args.drag_screenshot.resolve())})
+        if not args.drag_screenshot.is_file():
+            raise ToolError("QEMU did not create the dragged-window screenshot")
+        verify_desktop_capture(args.drag_screenshot)
     finally:
         try:
             if qmp is not None:
@@ -403,7 +437,7 @@ def run_smoke(args: argparse.Namespace) -> None:
 
     print(
         f"\nArgusOS smoke test passed; transcript: {args.log}; "
-        f"framebuffer: {args.screenshot}"
+        f"framebuffer: {args.screenshot}; dragged: {args.drag_screenshot}"
     )
 
 
@@ -457,6 +491,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("build/qemu-desktop.ppm"),
         help="framebuffer capture after the kernel shell becomes ready",
+    )
+    smoke.add_argument(
+        "--drag-screenshot",
+        type=Path,
+        default=Path("build/qemu-desktop-dragged.ppm"),
+        help="framebuffer capture after the pointer drag probe",
     )
     smoke.add_argument("--qemu", default="qemu-system-x86_64")
     smoke.add_argument("--ovmf-code", type=Path)

@@ -5,6 +5,7 @@
 
 #define ARGUS_APIC_TIMER_VECTOR 0x40u
 #define ARGUS_PS2_KEYBOARD_VECTOR 0x41u
+#define ARGUS_PS2_MOUSE_VECTOR 0x42u
 #define ARGUS_APIC_SPURIOUS_VECTOR 0xFFu
 
 int apic_init(const acpi_info_t *acpi);

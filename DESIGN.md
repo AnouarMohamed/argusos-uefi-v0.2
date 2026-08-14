@@ -1,16 +1,14 @@
 ---
-name: Argus 9OS
-description: A quiet, handmade workstation interface for ArgusOS.
+name: ArgusOS Desktop
+description: A quiet, direct workstation interface for ArgusOS.
 colors:
   field-olive: "#4c5148"
-  field-olive-dark: "#41463f"
   warm-chrome: "#b8b4a5"
   chrome-highlight: "#d3d0c2"
   chrome-shadow: "#6e6c64"
   terminal-ink: "#171a17"
   terminal-text: "#c9c8b5"
   slate-title: "#4e5869"
-  oxblood-active: "#795a58"
   near-ink: "#242724"
 typography:
   title:
@@ -40,7 +38,7 @@ spacing:
   md: "8px"
   lg: "12px"
 components:
-  panel-button:
+  active-task:
     backgroundColor: "{colors.warm-chrome}"
     textColor: "{colors.near-ink}"
     typography: "{typography.label}"
@@ -54,18 +52,18 @@ components:
     padding: "8px"
 ---
 
-# Design System: Argus 9OS
+# Design System: ArgusOS Desktop
 
 ## 1. Overview
 
 **Creative North Star: "The Quiet Workstation"**
 
-Argus 9OS should feel like a maintained computer in a dim room around the turn
-of the millennium: practical, slightly severe, and built by a person who cares
-more about legibility than fashion. The visual language combines old Linux
-desktop economy, early imageboard density, and tactile one-pixel system chrome.
+ArgusOS should feel like a maintained workstation in a dim room: practical,
+slightly severe, and built for legibility. Its visual language uses economical
+layout, restrained color, and tactile one-pixel system chrome without making an
+era or aesthetic reference part of the product identity.
 
-It explicitly rejects glossy Windows XP imitation, literal 4chan branding,
+It explicitly rejects glossy Windows XP imitation, literal imageboard branding,
 neon hacker theater, glass, gradients, rounded cards, and decorative animation.
 
 **Key Characteristics:**
@@ -73,8 +71,8 @@ neon hacker theater, glass, gradients, rounded cards, and decorative animation.
 - Muted olive field with warm gray system chrome
 - Square corners and crisp one-pixel bevels
 - Small bitmap type with compact, keyboard-first labels
-- One desaturated title color and one rare oxblood state color
-- Real system status in place of decorative widgets
+- One desaturated title color
+- Only real windows, actions, and state labels
 
 ## 2. Colors
 
@@ -89,7 +87,6 @@ tool styling while preserving clear terminal contrast.
 ### Secondary
 
 - **Faded Slate Title** (#4e5869): active title bars and keyboard focus.
-- **Quiet Oxblood** (#795a58): rare active or warning state, never decoration.
 
 ### Neutral
 
@@ -97,7 +94,7 @@ tool styling while preserving clear terminal contrast.
 - **Phosphor Paper** (#c9c8b5): terminal text and high-contrast labels.
 - **Chrome Highlight** (#d3d0c2): top and left bevel edges.
 - **Chrome Shadow** (#6e6c64): bottom and right bevel edges.
-- **Near Ink** (#242724): chrome text and icons.
+- **Near Ink** (#242724): chrome text and pointer outline.
 
 ### Named Rules
 
@@ -110,14 +107,14 @@ under ten percent of a screen and always communicates state.
 **Body Font:** Argus 5x7 Bitmap (monospace fallback)
 **Label/Mono Font:** Argus 5x7 Bitmap
 
-**Character:** One pixel vocabulary serves chrome, status, and terminal output.
+**Character:** One pixel vocabulary serves chrome and terminal output.
 Two-times integer scaling preserves hard edges on larger framebuffers.
 
 ### Hierarchy
 
-- **Title** (700, 14px, 1): window titles and the Argus launcher.
+- **Title** (700, 14px, 1): concise window titles.
 - **Body** (400, 14px, 1.28): terminal text, capped by the terminal viewport.
-- **Label** (700, 12px, 1px tracking): icons, panel status, and short controls.
+- **Label** (700, 12px, 1px tracking): active tasks and short controls.
 
 ### Named Rules
 
@@ -160,14 +157,15 @@ highlight and one shadow line. Never stack ornamental borders.
 
 ### Navigation
 
-The bottom panel contains one Argus launcher, a flat task label, and terse machine
-status. Active items use an inverted bevel. The desktop remains keyboard-first.
+The bottom panel shows running tasks only. It does not contain a launcher or
+status copy until those surfaces are functional. Active items use an inverted
+bevel.
 
 ### Terminal Window
 
-A single large terminal is the first real application surface. Its title bar
-states that it is a kernel console, its contents are real serial-mirrored output,
-and its frame leaves enough field visible to read as a desktop.
+A single movable terminal is the first real application surface. Its concise
+title names the surface, its contents are real serial-mirrored output, and its
+frame leaves enough field visible for pointer movement and dragging.
 
 ## 6. Do's and Don'ts
 
@@ -175,14 +173,14 @@ and its frame leaves enough field visible to read as a desktop.
 
 - **Do** use #4c5148 as the dominant field and #b8b4a5 for system chrome.
 - **Do** use square corners and exact one-pixel highlight/shadow edges.
-- **Do** show real keyboard, storage, and shell state in terse language.
+- **Do** name only real surfaces, actions, and system state.
 - **Do** keep the terminal readable with #c9c8b5 on #171a17.
 - **Do** preserve keyboard and serial access for every important action.
 
 ### Don't:
 
-- **Don't** make ArgusOS a glossy Windows XP clone or a literal 4chan clone.
-- **Don't** use copied Microsoft or imageboard artwork, icons, trademarks, or layout.
+- **Don't** make ArgusOS a glossy Windows XP clone or a literal imageboard clone.
+- **Don't** use era labels, copied artwork, fake system state, or nonfunctional chrome.
 - **Don't** use neon cyberpunk accents, gradients, glassmorphism, or rounded cards.
 - **Don't** use a colored side stripe on any panel or item.
 - **Don't** animate anything that does not communicate a state change.

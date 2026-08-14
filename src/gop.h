@@ -19,6 +19,7 @@ typedef struct {
 int gop_init(EFI_SYSTEM_TABLE *st);
 const argus_gop_t *gop_info(void);
 uint32_t gop_rgb(uint8_t r, uint8_t g, uint8_t b);
+uint32_t gop_getpixel(uint32_t x, uint32_t y);
 void gop_putpixel(uint32_t x, uint32_t y, uint32_t packed);
 void gop_fill(uint32_t packed);
 void gop_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t packed);
@@ -30,6 +31,14 @@ void gop_scroll_rect_up(
     uint32_t h,
     uint32_t pixels,
     uint32_t fill_color
+);
+int gop_move_rect(
+    uint32_t source_x,
+    uint32_t source_y,
+    uint32_t destination_x,
+    uint32_t destination_y,
+    uint32_t width,
+    uint32_t height
 );
 
 #endif

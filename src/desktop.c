@@ -3,9 +3,11 @@
 #include "font5x7.h"
 #include "gop.h"
 
+#define POINTER_WIDTH 12u
+#define POINTER_HEIGHT 16u
+
 typedef struct {
     uint32_t field;
-    uint32_t field_dark;
     uint32_t chrome;
     uint32_t highlight;
     uint32_t shadow;
@@ -15,42 +17,86 @@ typedef struct {
     uint32_t ink;
 } desktop_colors_t;
 
-static desktop_colors_t colors;
+static const uint16_t pointer_outer[POINTER_HEIGHT] = {
+    0x800u, 0xC00u, 0xE00u, 0xF00u,
+    0xF80u, 0xFC0u, 0xFE0u, 0xFF0u,
+    0xFF8u, 0xFC0u, 0xDC0u, 0x8E0u,
+    0x060u, 0x070u, 0x030u, 0x000u
+};
 
-static uint32_t text_width(const char *text, uint32_t scale) {
+static const uint16_t pointer_inner[POINTER_HEIGHT] = {
+    0x000u, 0x400u, 0x600u, 0x700u,
+    0x780u, 0x7C0u, 0x7E0u, 0x7F0u,
+    0x7C0u, 0x780u, 0x4C0u, 0x040u,
+    0x020u, 0x020u, 0x000u, 0x000u
+};
+
+static desktop_colors_t colors;
+static uint32_t scale;
+static uint32_t panel_height;
+static uint32_t title_height;
+static uint32_t window_x;
+static uint32_t window_y;
+static uint32_t window_width;
+static uint32_t window_height;
+static uint32_t terminal_offset_x;
+static uint32_t terminal_offset_y;
+static uint32_t terminal_width;
+static uint32_t terminal_height;
+
+static int pointer_enabled;
+static int pointer_visible;
+static int pointer_initialized;
+static int dragging;
+static uint32_t pointer_x;
+static uint32_t pointer_y;
+static uint32_t drag_offset_x;
+static uint32_t drag_offset_y;
+static uint8_t pointer_buttons;
+static uint64_t drag_moves;
+static uint32_t pointer_saved[POINTER_WIDTH * POINTER_HEIGHT];
+static uint32_t pointer_saved_width;
+static uint32_t pointer_saved_height;
+
+static uint32_t text_width(const char *text, uint32_t text_scale) {
     uint32_t count = 0;
     while (*text++) ++count;
-    return count * 6u * scale;
+    return count * 6u * text_scale;
 }
 
-static void draw_glyph(char c, uint32_t x, uint32_t y, uint32_t scale, uint32_t color) {
+static void draw_glyph(
+    char c,
+    uint32_t x,
+    uint32_t y,
+    uint32_t text_scale,
+    uint32_t color
+) {
     for (uint32_t row = 0; row < 7u; ++row) {
         uint8_t bits = font5x7_row(c, row);
         for (uint32_t col = 0; col < 5u; ++col) {
             if (bits & (1u << (4u - col)))
-                gop_fill_rect(x + col * scale, y + row * scale, scale, scale, color);
+                gop_fill_rect(
+                    x + col * text_scale,
+                    y + row * text_scale,
+                    text_scale,
+                    text_scale,
+                    color
+                );
         }
     }
 }
 
-static void draw_text(const char *text, uint32_t x, uint32_t y, uint32_t scale, uint32_t color) {
-    while (*text) {
-        draw_glyph(*text++, x, y, scale, color);
-        x += 6u * scale;
-    }
-}
-
-static void draw_centered_text(
+static void draw_text(
     const char *text,
     uint32_t x,
     uint32_t y,
-    uint32_t width,
-    uint32_t scale,
+    uint32_t text_scale,
     uint32_t color
 ) {
-    uint32_t width_used = text_width(text, scale);
-    uint32_t start = width_used < width ? x + (width - width_used) / 2u : x;
-    draw_text(text, start, y, scale, color);
+    while (*text) {
+        draw_glyph(*text++, x, y, text_scale, color);
+        x += 6u * text_scale;
+    }
 }
 
 static void draw_bevel(
@@ -71,37 +117,8 @@ static void draw_bevel(
     gop_fill_rect(x + width - 1u, y, 1u, height, bottom_right);
 }
 
-static void draw_icon(
-    uint32_t x,
-    uint32_t y,
-    const char *symbol,
-    const char *label,
-    uint32_t scale
-) {
-    uint32_t box_width = 34u * scale;
-    uint32_t box_height = 24u * scale;
-    draw_bevel(x, y, box_width, box_height, colors.chrome, 1);
-    draw_centered_text(
-        symbol,
-        x,
-        y + (box_height - 7u * scale) / 2u,
-        box_width,
-        scale,
-        colors.ink
-    );
-    draw_centered_text(
-        label,
-        x > 8u * scale ? x - 8u * scale : 0u,
-        y + box_height + 5u * scale,
-        box_width + 16u * scale,
-        scale,
-        colors.terminal_text
-    );
-}
-
 static void load_colors(void) {
     colors.field = gop_rgb(0x4c, 0x51, 0x48);
-    colors.field_dark = gop_rgb(0x41, 0x46, 0x3f);
     colors.chrome = gop_rgb(0xb8, 0xb4, 0xa5);
     colors.highlight = gop_rgb(0xd3, 0xd0, 0xc2);
     colors.shadow = gop_rgb(0x6e, 0x6c, 0x64);
@@ -111,56 +128,25 @@ static void load_colors(void) {
     colors.ink = gop_rgb(0x24, 0x27, 0x24);
 }
 
-int desktop_redraw(void) {
-    if (!console_uses_framebuffer()) return 0;
-    const argus_gop_t *g = gop_info();
-    if (!g->usable || g->width < 320u || g->height < 200u) return 0;
-
-    load_colors();
-    uint32_t scale = g->width >= 800u && g->height >= 600u ? 2u : 1u;
-    uint32_t panel_height = scale == 2u ? 32u : 24u;
-    uint32_t left_strip = scale == 2u ? 116u : 82u;
-    uint32_t outer_margin = scale == 2u ? 20u : 12u;
-    uint32_t window_y = scale == 2u ? 54u : 40u;
-    uint32_t title_height = scale == 2u ? 24u : 16u;
-    uint32_t window_width = g->width - left_strip - outer_margin;
-    uint32_t window_bottom = g->height - panel_height - outer_margin;
-    if (window_bottom <= window_y + title_height + 12u) return 0;
-    uint32_t window_height = window_bottom - window_y;
-
-    gop_fill(colors.field);
-    gop_fill_rect(0, 0, g->width, 1u, colors.field_dark);
-    draw_text("ARGUS 9OS // LOCAL WORKSTATION", 10u, 10u, scale, colors.terminal_text);
-    gop_fill_rect(10u, 20u * scale, left_strip - 20u, 1u, colors.field_dark);
-
-    uint32_t icon_x = scale == 2u ? 24u : 14u;
-    uint32_t icon_y = scale == 2u ? 64u : 48u;
-    draw_icon(icon_x, icon_y, ">_", "TTY0", scale);
-    if (icon_y + 112u * scale < g->height - panel_height)
-        draw_icon(icon_x, icon_y + 62u * scale, "/", "FILES", scale);
-    if (icon_y + 174u * scale < g->height - panel_height)
-        draw_icon(icon_x, icon_y + 124u * scale, "I", "ABOUT", scale);
-
-    draw_bevel(left_strip, window_y, window_width, window_height, colors.chrome, 1);
+static void draw_window(void) {
+    draw_bevel(window_x, window_y, window_width, window_height, colors.chrome, 1);
     gop_fill_rect(
-        left_strip + 3u,
+        window_x + 3u,
         window_y + 3u,
         window_width - 6u,
         title_height,
         colors.title
     );
     draw_text(
-        "ARGUS KERNEL CONSOLE // TTY0",
-        left_strip + 7u,
+        "KERNEL CONSOLE",
+        window_x + 7u,
         window_y + 5u,
         scale,
         colors.terminal_text
     );
 
-    uint32_t terminal_x = left_strip + 4u;
-    uint32_t terminal_y = window_y + title_height + 5u;
-    uint32_t terminal_width = window_width - 8u;
-    uint32_t terminal_height = window_height - title_height - 9u;
+    uint32_t terminal_x = window_x + terminal_offset_x;
+    uint32_t terminal_y = window_y + terminal_offset_y;
     draw_bevel(
         terminal_x,
         terminal_y,
@@ -169,55 +155,145 @@ int desktop_redraw(void) {
         colors.terminal,
         0
     );
+}
 
+static void draw_panel(const argus_gop_t *g) {
     uint32_t panel_y = g->height - panel_height;
     gop_fill_rect(0, panel_y, g->width, panel_height, colors.chrome);
     gop_fill_rect(0, panel_y, g->width, 1u, colors.highlight);
     gop_fill_rect(0, g->height - 1u, g->width, 1u, colors.shadow);
 
-    uint32_t button_height = panel_height - 8u;
-    uint32_t launcher_width = scale == 2u ? 104u : 72u;
-    draw_bevel(4u, panel_y + 4u, launcher_width, button_height, colors.chrome, 1);
-    draw_centered_text(
-        "ARGUS",
-        4u,
+    const char *task = "KERNEL CONSOLE";
+    uint32_t task_width = text_width(task, scale) + 16u;
+    uint32_t task_height = panel_height - 8u;
+    draw_bevel(4u, panel_y + 4u, task_width, task_height, colors.chrome, 0);
+    draw_text(
+        task,
+        12u,
         panel_y + (panel_height - 7u * scale) / 2u,
-        launcher_width,
         scale,
         colors.ink
     );
+}
 
-    uint32_t task_x = launcher_width + 10u;
-    uint32_t task_width = scale == 2u ? 248u : 146u;
-    if (task_x + task_width + 8u < g->width) {
-        draw_bevel(task_x, panel_y + 4u, task_width, button_height, colors.chrome, 0);
-        draw_text(
-            scale == 2u ? "TTY0: KERNEL CONSOLE" : "TTY0: CONSOLE",
-            task_x + 7u,
-            panel_y + (panel_height - 7u * scale) / 2u,
-            scale,
-            colors.ink
-        );
+static int point_in_title(uint32_t x, uint32_t y) {
+    return x >= window_x + 3u && x < window_x + window_width - 3u &&
+           y >= window_y + 3u && y < window_y + 3u + title_height;
+}
+
+static void fill_exposed_window_area(
+    uint32_t old_x,
+    uint32_t old_y,
+    uint32_t new_x,
+    uint32_t new_y
+) {
+    uint32_t old_right = old_x + window_width;
+    uint32_t old_bottom = old_y + window_height;
+    uint32_t new_right = new_x + window_width;
+    uint32_t new_bottom = new_y + window_height;
+    uint32_t overlap_left = old_x > new_x ? old_x : new_x;
+    uint32_t overlap_top = old_y > new_y ? old_y : new_y;
+    uint32_t overlap_right = old_right < new_right ? old_right : new_right;
+    uint32_t overlap_bottom = old_bottom < new_bottom ? old_bottom : new_bottom;
+
+    if (overlap_left >= overlap_right || overlap_top >= overlap_bottom) {
+        gop_fill_rect(old_x, old_y, window_width, window_height, colors.field);
+        return;
     }
 
-    const char *status = scale == 2u ? "PS/2 | LOCAL" : "LOCAL";
-    uint32_t status_width = text_width(status, scale) + 12u;
-    if (status_width + 4u < g->width) {
-        uint32_t status_x = g->width - status_width - 4u;
-        draw_bevel(status_x, panel_y + 4u, status_width, button_height, colors.chrome, 0);
-        draw_centered_text(
-            status,
-            status_x,
-            panel_y + (panel_height - 7u * scale) / 2u,
-            status_width,
-            scale,
-            colors.ink
-        );
+    gop_fill_rect(old_x, old_y, window_width, overlap_top - old_y, colors.field);
+    gop_fill_rect(
+        old_x,
+        overlap_bottom,
+        window_width,
+        old_bottom - overlap_bottom,
+        colors.field
+    );
+    gop_fill_rect(
+        old_x,
+        overlap_top,
+        overlap_left - old_x,
+        overlap_bottom - overlap_top,
+        colors.field
+    );
+    gop_fill_rect(
+        overlap_right,
+        overlap_top,
+        old_right - overlap_right,
+        overlap_bottom - overlap_top,
+        colors.field
+    );
+}
+
+static void move_window(uint32_t new_x, uint32_t new_y) {
+    const argus_gop_t *g = gop_info();
+    uint32_t maximum_x = g->width - window_width;
+    uint32_t maximum_y = g->height - panel_height - window_height;
+    if (new_x > maximum_x) new_x = maximum_x;
+    if (new_y > maximum_y) new_y = maximum_y;
+    if (new_x == window_x && new_y == window_y) return;
+
+    uint32_t old_x = window_x;
+    uint32_t old_y = window_y;
+    if (!gop_move_rect(
+            old_x,
+            old_y,
+            new_x,
+            new_y,
+            window_width,
+            window_height))
+        return;
+    fill_exposed_window_area(old_x, old_y, new_x, new_y);
+    window_x = new_x;
+    window_y = new_y;
+    (void)console_move_region(
+        window_x + terminal_offset_x + 3u,
+        window_y + terminal_offset_y + 3u
+    );
+    ++drag_moves;
+}
+
+static uint32_t clamp_pointer_coordinate(int64_t value, uint32_t maximum) {
+    if (value < 0) return 0;
+    if ((uint64_t)value > maximum) return maximum;
+    return (uint32_t)value;
+}
+
+int desktop_redraw(void) {
+    if (!console_uses_framebuffer()) return 0;
+    const argus_gop_t *g = gop_info();
+    if (!g->usable || g->width < 320u || g->height < 200u) return 0;
+
+    pointer_visible = 0;
+    dragging = 0;
+    pointer_buttons = 0;
+    load_colors();
+    scale = g->width >= 800u && g->height >= 600u ? 2u : 1u;
+    panel_height = scale == 2u ? 32u : 24u;
+    title_height = scale == 2u ? 24u : 16u;
+    uint32_t available_height = g->height - panel_height;
+    window_width = (g->width * 3u) / 4u;
+    window_height = (available_height * 3u) / 4u;
+    window_x = (g->width - window_width) / 2u;
+    window_y = (available_height - window_height) / 2u;
+    terminal_offset_x = 4u;
+    terminal_offset_y = title_height + 5u;
+    terminal_width = window_width - 8u;
+    terminal_height = window_height - title_height - 9u;
+
+    gop_fill(colors.field);
+    draw_window();
+    draw_panel(g);
+
+    if (!pointer_initialized) {
+        pointer_x = g->width / 2u;
+        pointer_y = available_height / 2u;
+        pointer_initialized = 1;
     }
 
     return console_set_region(
-        terminal_x + 3u,
-        terminal_y + 3u,
+        window_x + terminal_offset_x + 3u,
+        window_y + terminal_offset_y + 3u,
         terminal_width - 6u,
         terminal_height - 6u,
         0xc9,
@@ -230,5 +306,93 @@ int desktop_redraw(void) {
 }
 
 int desktop_init(void) {
+    pointer_initialized = 0;
+    pointer_enabled = 0;
+    pointer_visible = 0;
+    dragging = 0;
+    pointer_buttons = 0;
+    drag_moves = 0;
     return desktop_redraw();
 }
+
+void desktop_pointer_set_enabled(int enabled) {
+    if (!enabled) desktop_pointer_hide();
+    pointer_enabled = enabled != 0;
+}
+
+void desktop_pointer_show(void) {
+    if (!pointer_enabled || pointer_visible || !console_uses_framebuffer()) return;
+    const argus_gop_t *g = gop_info();
+    pointer_saved_width = POINTER_WIDTH;
+    pointer_saved_height = POINTER_HEIGHT;
+    if (pointer_saved_width > g->width - pointer_x)
+        pointer_saved_width = g->width - pointer_x;
+    if (pointer_saved_height > g->height - pointer_y)
+        pointer_saved_height = g->height - pointer_y;
+
+    for (uint32_t y = 0; y < pointer_saved_height; ++y) {
+        for (uint32_t x = 0; x < pointer_saved_width; ++x) {
+            pointer_saved[y * POINTER_WIDTH + x] =
+                gop_getpixel(pointer_x + x, pointer_y + y);
+            uint16_t bit = (uint16_t)(1u << (11u - x));
+            if (pointer_outer[y] & bit) {
+                uint32_t color = pointer_inner[y] & bit
+                    ? colors.highlight
+                    : colors.ink;
+                gop_putpixel(pointer_x + x, pointer_y + y, color);
+            }
+        }
+    }
+    pointer_visible = 1;
+}
+
+void desktop_pointer_hide(void) {
+    if (!pointer_visible) return;
+    for (uint32_t y = 0; y < pointer_saved_height; ++y)
+        for (uint32_t x = 0; x < pointer_saved_width; ++x)
+            gop_putpixel(
+                pointer_x + x,
+                pointer_y + y,
+                pointer_saved[y * POINTER_WIDTH + x]
+            );
+    pointer_visible = 0;
+}
+
+void desktop_pointer_event(int16_t dx, int16_t dy, uint8_t buttons) {
+    if (!pointer_enabled || !console_uses_framebuffer()) return;
+    const argus_gop_t *g = gop_info();
+    desktop_pointer_hide();
+    pointer_x = clamp_pointer_coordinate(
+        (int64_t)pointer_x + dx,
+        g->width - 1u
+    );
+    pointer_y = clamp_pointer_coordinate(
+        (int64_t)pointer_y + dy,
+        g->height - 1u
+    );
+
+    int left_pressed = (buttons & 1u) && !(pointer_buttons & 1u);
+    if (left_pressed && point_in_title(pointer_x, pointer_y)) {
+        dragging = 1;
+        drag_offset_x = pointer_x - window_x;
+        drag_offset_y = pointer_y - window_y;
+    }
+    if (dragging && (buttons & 1u)) {
+        uint32_t new_x = pointer_x > drag_offset_x
+            ? pointer_x - drag_offset_x
+            : 0u;
+        uint32_t new_y = pointer_y > drag_offset_y
+            ? pointer_y - drag_offset_y
+            : 0u;
+        move_window(new_x, new_y);
+    }
+    if (!(buttons & 1u)) dragging = 0;
+    pointer_buttons = buttons;
+    desktop_pointer_show();
+}
+
+uint64_t desktop_drag_moves(void) { return drag_moves; }
+uint32_t desktop_pointer_x(void) { return pointer_x; }
+uint32_t desktop_pointer_y(void) { return pointer_y; }
+uint32_t desktop_window_x(void) { return window_x; }
+uint32_t desktop_window_y(void) { return window_y; }

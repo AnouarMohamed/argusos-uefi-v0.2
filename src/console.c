@@ -175,3 +175,19 @@ int console_set_region(
     console_clear();
     return 1;
 }
+
+int console_move_region(uint32_t x, uint32_t y) {
+    if (!framebuffer_mode) return 0;
+    const argus_gop_t *g = gop_info();
+    if (x >= g->width || y >= g->height ||
+        region_w > g->width - x || region_h > g->height - y)
+        return 0;
+
+    uint32_t cursor_offset_x = cursor_x - region_x;
+    uint32_t cursor_offset_y = cursor_y - region_y;
+    region_x = x;
+    region_y = y;
+    cursor_x = region_x + cursor_offset_x;
+    cursor_y = region_y + cursor_offset_y;
+    return 1;
+}

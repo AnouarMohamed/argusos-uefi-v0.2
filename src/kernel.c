@@ -6,6 +6,7 @@
 #include "block.h"
 #include "fat32.h"
 #include "heap.h"
+#include "input.h"
 #include "kconsole.h"
 #include "kernel_shell.h"
 #include "module.h"
@@ -80,7 +81,7 @@ void kernel_exception_panic(
 void kernel_main(const boot_info_t *boot_info) {
     kconsole_clear();
 
-    kprint("ArgusOS kernel v0.12\n");
+    kprint("ArgusOS kernel v0.13\n");
     kprint("ARGUS_KERNEL_ONLINE\n");
 
     if (!boot_info || boot_info->magic != ARGUS_BOOT_INFO_MAGIC ||
@@ -220,6 +221,8 @@ void kernel_main(const boot_info_t *boot_info) {
     }
     if (!apic_init(&acpi)) panic("local APIC initialization failed");
     kprint("LOCAL_APIC_ONLINE\n");
+
+    input_init(&acpi);
 
     arch_enable_interrupts();
     for (uint64_t spins = 0; spins < 200000000u && !apic_timer_ticks(); ++spins)

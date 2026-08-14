@@ -11,6 +11,7 @@
 #include "pci.h"
 #include "pmm.h"
 #include "ramfs.h"
+#include "serial.h"
 
 extern void cpu_halt_forever(void) __attribute__((noreturn));
 extern void cpu_trigger_breakpoint(void);
@@ -67,6 +68,7 @@ static void print_help(void) {
     kconsole_write("  ticks        local-APIC timer ticks\n");
     kconsole_write("  input        native input backends\n");
     kconsole_write("  irqtest      confirm IRQ keyboard command delivery\n");
+    kconsole_write("  ui           pointer and window state\n");
     kconsole_write("  desktop      redraw the framebuffer desktop\n");
     kconsole_write("  clear        clear framebuffer/terminal\n");
     kconsole_write("  echo TEXT    print text\n");
@@ -79,7 +81,7 @@ static void print_status(
     const acpi_info_t *acpi,
     const paging_info_t *paging
 ) {
-    kconsole_write("\nArgusOS kernel v0.12\n");
+    kconsole_write("\nArgusOS kernel v0.13\n");
     kconsole_write("Boot Services: exited\nCPUs: ");
     kconsole_write_dec(acpi->enabled_cpu_count);
     kconsole_write("\nCR3: ");
@@ -426,11 +428,37 @@ static void execute_command(
         kconsole_write(input_keyboard_uses_irq() ? "I/O APIC IRQ" : "polling fallback");
         kconsole_write("\nDropped keys: ");
         kconsole_write_dec(input_dropped_keys());
+        kconsole_write("\nPS/2 mouse: ");
+        kconsole_write(input_has_pointer() ? "online" : "unavailable");
+        kconsole_write("\nMouse mode: ");
+        if (!input_has_pointer()) kconsole_write("unavailable");
+        else kconsole_write(input_pointer_uses_irq()
+            ? "I/O APIC IRQ" : "polling fallback");
+        kconsole_write("\nMouse packets: ");
+        kconsole_write_dec(input_pointer_packets());
+        kconsole_write("\nDropped mouse events: ");
+        kconsole_write_dec(input_dropped_pointer_events());
         kconsole_write("\n");
     }
     else if (strings_equal(line, "irqtest"))
         kconsole_write(input_keyboard_uses_irq()
             ? "PS2_IRQ_INPUT_OK\n" : "PS2_IRQ_INPUT_UNAVAILABLE\n");
+    else if (strings_equal(line, "ui")) {
+        kconsole_write("Pointer: ");
+        kconsole_write(input_has_pointer() ? "online" : "unavailable");
+        kconsole_write("\nPointer position: ");
+        kconsole_write_dec(desktop_pointer_x());
+        kconsole_putc(',');
+        kconsole_write_dec(desktop_pointer_y());
+        kconsole_write("\nWindow position: ");
+        kconsole_write_dec(desktop_window_x());
+        kconsole_putc(',');
+        kconsole_write_dec(desktop_window_y());
+        kconsole_write("\nWindow moves: ");
+        kconsole_write_dec(desktop_drag_moves());
+        kconsole_write(desktop_drag_moves()
+            ? "\nDESKTOP_DRAG_OK\n" : "\nDESKTOP_POINTER_IDLE\n");
+    }
     else if (strings_equal(line, "desktop"))
         kconsole_write(desktop_redraw()
             ? "DESKTOP_UI_REDRAWN\n" : "DESKTOP_UI_UNAVAILABLE\n");
@@ -451,24 +479,36 @@ void kernel_shell_run(
 ) {
     char line[128];
     unsigned used = 0;
-    input_init(acpi);
 
-    kconsole_write(desktop_init()
-        ? "DESKTOP_UI_ONLINE\n" : "DESKTOP_UI_UNAVAILABLE\n");
-
-    kconsole_write("Native input initialized.\n");
-    kconsole_write(input_keyboard_uses_irq()
+    int desktop_online = desktop_init();
+    desktop_pointer_set_enabled(desktop_online && input_has_pointer());
+    serial_write(desktop_online ? "DESKTOP_UI_ONLINE\n" : "DESKTOP_UI_UNAVAILABLE\n");
+    serial_write(input_keyboard_uses_irq()
         ? "PS2_IRQ_ONLINE\n" : "PS2_POLLING_FALLBACK\n");
-    kconsole_write("KERNEL_SHELL_READY\n");
+    if (!input_has_pointer()) serial_write("PS2_MOUSE_UNAVAILABLE\n");
+    else serial_write(input_pointer_uses_irq()
+        ? "PS2_MOUSE_IRQ_ONLINE\n" : "PS2_MOUSE_POLLING_FALLBACK\n");
+    serial_write("KERNEL_SHELL_READY\n");
     kconsole_write("argus-kernel> ");
+    desktop_pointer_show();
 
     for (;;) {
         int value = input_getc_nonblocking();
         if (value < 0) {
+            input_pointer_event_t pointer_event;
+            if (input_pointer_event_nonblocking(&pointer_event)) {
+                desktop_pointer_event(
+                    pointer_event.dx,
+                    pointer_event.dy,
+                    pointer_event.buttons
+                );
+                continue;
+            }
             cpu_wait_for_interrupt();
             continue;
         }
 
+        desktop_pointer_hide();
         char c = (char)value;
         if (c == '\r' || c == '\n') {
             line[used] = 0;
@@ -490,5 +530,6 @@ void kernel_shell_run(
             line[used++] = c;
             kconsole_putc(c);
         }
+        desktop_pointer_show();
     }
 }

@@ -114,7 +114,7 @@ jobs:
 
       - name: Validate smoke-test transcript
         run: |
-          grep -Fq "ArgusOS UEFI Study Monitor v0.12" qemu.log
+          grep -Fq "ArgusOS UEFI Study Monitor v0.13" qemu.log
           grep -Fq "ARGUS_KERNEL_ONLINE" qemu.log
           grep -Fq "BOOT_SERVICES_EXITED" qemu.log
           grep -Fq "PMM_SELF_TEST_PASS" qemu.log
@@ -141,7 +141,9 @@ jobs:
           grep -Fq "DESKTOP_UI_ONLINE" qemu.log
           grep -Fq "DESKTOP_UI_REDRAWN" qemu.log
           grep -Fq "PS2_IRQ_ONLINE" qemu.log
+          grep -Fq "PS2_MOUSE_IRQ_ONLINE" qemu.log
           grep -Fq "PS2_IRQ_INPUT_OK" qemu.log
+          grep -Fq "DESKTOP_DRAG_OK" qemu.log
           grep -Fq "KERNEL_SHELL_READY" qemu.log
           grep -Fq "STATUS_OK" qemu.log
           grep -Fq "MODULES_OK" qemu.log
@@ -164,13 +166,17 @@ jobs:
           grep -Fq "FAT32_CAT_OK" qemu.log
           grep -Fq "FAT32 error: not found" qemu.log
           test -s build/qemu-desktop.ppm
+          test -s build/qemu-desktop-dragged.ppm
           file build/qemu-desktop.ppm
+          file build/qemu-desktop-dragged.ppm
 
       - name: Upload desktop capture
         uses: actions/upload-artifact@v4
         with:
           name: argusos-desktop-framebuffer
-          path: build/qemu-desktop.ppm
+          path: |
+            build/qemu-desktop.ppm
+            build/qemu-desktop-dragged.ppm
           if-no-files-found: error
 
       - name: Require protected fault paths
