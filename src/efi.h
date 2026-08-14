@@ -22,9 +22,12 @@ typedef void VOID;
 
 #define EFI_SUCCESS 0
 #define EFIERR(code) (0x8000000000000000ULL | (code))
+#define EFI_LOAD_ERROR EFIERR(1)
+#define EFI_INVALID_PARAMETER EFIERR(2)
 #define EFI_BAD_BUFFER_SIZE EFIERR(4)
 #define EFI_BUFFER_TOO_SMALL EFIERR(5)
 #define EFI_OUT_OF_RESOURCES EFIERR(9)
+#define EFI_NOT_FOUND EFIERR(14)
 #define EFI_ERROR(x) (((x) & (1ULL << 63)) != 0)
 
 #define EFI_TEXT_BLACK       0x00
@@ -48,8 +51,24 @@ typedef void VOID;
 #define EFI_RESET_WARM      1
 #define EFI_RESET_SHUTDOWN  2
 
-#define EfiConventionalMemory 7
-#define EfiLoaderData 2
+#define AllocateAnyPages 0
+
+#define EfiReservedMemoryType      0
+#define EfiLoaderCode              1
+#define EfiLoaderData              2
+#define EfiBootServicesCode        3
+#define EfiBootServicesData        4
+#define EfiRuntimeServicesCode     5
+#define EfiRuntimeServicesData     6
+#define EfiConventionalMemory      7
+#define EfiUnusableMemory          8
+#define EfiACPIReclaimMemory       9
+#define EfiACPIMemoryNVS          10
+#define EfiMemoryMappedIO         11
+#define EfiMemoryMappedIOPortSpace 12
+#define EfiPalCode                13
+#define EfiPersistentMemory       14
+#define EfiUnacceptedMemoryType   15
 
 typedef struct {
     uint32_t Data1;
@@ -140,19 +159,23 @@ typedef struct {
 } EFI_MEMORY_DESCRIPTOR;
 
 typedef EFI_STATUS (EFIAPI *EFI_GET_MEMORY_MAP)(UINTN *, EFI_MEMORY_DESCRIPTOR *, UINTN *, UINTN *, uint32_t *);
+typedef EFI_STATUS (EFIAPI *EFI_ALLOCATE_PAGES)(uint32_t, uint32_t, UINTN, EFI_PHYSICAL_ADDRESS *);
+typedef EFI_STATUS (EFIAPI *EFI_FREE_PAGES)(EFI_PHYSICAL_ADDRESS, UINTN);
 typedef EFI_STATUS (EFIAPI *EFI_ALLOCATE_POOL)(uint32_t, UINTN, VOID **);
 typedef EFI_STATUS (EFIAPI *EFI_FREE_POOL)(VOID *);
 typedef EFI_STATUS (EFIAPI *EFI_WAIT_FOR_EVENT)(UINTN, EFI_EVENT *, UINTN *);
 typedef EFI_STATUS (EFIAPI *EFI_STALL)(UINTN);
 typedef EFI_STATUS (EFIAPI *EFI_SET_WATCHDOG_TIMER)(UINTN, uint64_t, UINTN, CHAR16 *);
+typedef EFI_STATUS (EFIAPI *EFI_HANDLE_PROTOCOL)(EFI_HANDLE, EFI_GUID *, VOID **);
 typedef EFI_STATUS (EFIAPI *EFI_LOCATE_PROTOCOL)(EFI_GUID *, VOID *, VOID **);
+typedef EFI_STATUS (EFIAPI *EFI_EXIT_BOOT_SERVICES)(EFI_HANDLE, UINTN);
 
 typedef struct EFI_BOOT_SERVICES {
     EFI_TABLE_HEADER Hdr;
     void *RaiseTPL;
     void *RestoreTPL;
-    void *AllocatePages;
-    void *FreePages;
+    EFI_ALLOCATE_PAGES AllocatePages;
+    EFI_FREE_PAGES FreePages;
     EFI_GET_MEMORY_MAP GetMemoryMap;
     EFI_ALLOCATE_POOL AllocatePool;
     EFI_FREE_POOL FreePool;
@@ -165,7 +188,7 @@ typedef struct EFI_BOOT_SERVICES {
     void *InstallProtocolInterface;
     void *ReinstallProtocolInterface;
     void *UninstallProtocolInterface;
-    void *HandleProtocol;
+    EFI_HANDLE_PROTOCOL HandleProtocol;
     void *Reserved;
     void *RegisterProtocolNotify;
     void *LocateHandle;
@@ -175,7 +198,7 @@ typedef struct EFI_BOOT_SERVICES {
     void *StartImage;
     void *Exit;
     void *UnloadImage;
-    void *ExitBootServices;
+    EFI_EXIT_BOOT_SERVICES ExitBootServices;
     void *GetNextMonotonicCount;
     EFI_STALL Stall;
     EFI_SET_WATCHDOG_TIMER SetWatchdogTimer;
@@ -217,6 +240,11 @@ typedef struct EFI_RUNTIME_SERVICES {
 } EFI_RUNTIME_SERVICES;
 
 typedef struct {
+    EFI_GUID VendorGuid;
+    VOID *VendorTable;
+} EFI_CONFIGURATION_TABLE;
+
+typedef struct {
     EFI_TABLE_HEADER Hdr;
     CHAR16 *FirmwareVendor;
     uint32_t FirmwareRevision;
@@ -229,8 +257,33 @@ typedef struct {
     EFI_RUNTIME_SERVICES *RuntimeServices;
     EFI_BOOT_SERVICES *BootServices;
     UINTN NumberOfTableEntries;
-    void *ConfigurationTable;
+    EFI_CONFIGURATION_TABLE *ConfigurationTable;
 } EFI_SYSTEM_TABLE;
+
+typedef struct {
+    uint32_t Revision;
+    EFI_HANDLE ParentHandle;
+    EFI_SYSTEM_TABLE *SystemTable;
+    EFI_HANDLE DeviceHandle;
+    VOID *FilePath;
+    VOID *Reserved;
+    uint32_t LoadOptionsSize;
+    VOID *LoadOptions;
+    VOID *ImageBase;
+    uint64_t ImageSize;
+    uint32_t ImageCodeType;
+    uint32_t ImageDataType;
+    VOID *Unload;
+} EFI_LOADED_IMAGE_PROTOCOL;
+
+#define EFI_LOADED_IMAGE_PROTOCOL_GUID \
+    {0x5b1b31a1, 0x9562, 0x11d2, {0x8e,0x3f,0x00,0xa0,0xc9,0x69,0x72,0x3b}}
+
+#define EFI_ACPI_TABLE_GUID \
+    {0xeb9d2d30, 0x2d88, 0x11d3, {0x9a,0x16,0x00,0x90,0x27,0x3f,0xc1,0x4d}}
+
+#define EFI_ACPI_20_TABLE_GUID \
+    {0x8868e871, 0xe4f1, 0x11d3, {0xbc,0x22,0x00,0x80,0xc7,0x3c,0x88,0x81}}
 
 /* UEFI Graphics Output Protocol (GOP) */
 typedef struct EFI_GRAPHICS_OUTPUT_PROTOCOL EFI_GRAPHICS_OUTPUT_PROTOCOL;
