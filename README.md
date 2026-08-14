@@ -1,4 +1,4 @@
-# ArgusOS UEFI Study Kernel v0.8
+# ArgusOS UEFI Study Kernel v0.9
 
 A deliberately small x86-64 UEFI bare-metal study kernel.
 
@@ -34,8 +34,8 @@ kernel with framebuffer and direct COM1 output.
   Enter, Backspace, and Tab without firmware services.
 - A post-firmware kernel monitor accepts commands through COM1 or PS/2 while
   rendering to the framebuffer and serial terminal.
-- A versioned, validated C module ABI hosts one statically linked `no_std` Rust
-  checksum module without giving it boot, allocator, interrupt, or device ownership.
+- Versioned, validated C ABIs host statically linked `no_std` Rust checksum and
+  RAMFS components without giving Rust boot, allocator, interrupt, or device ownership.
 - A dependency-free Python host tool creates test media and drives interactive
   QEMU smoke tests through the native serial shell.
 - Physical and heap allocators run fragmentation, exhaustion, invalid-free,
@@ -44,13 +44,16 @@ kernel with framebuffer and direct COM1 output.
 - A 64-bit TSS gives double faults a dedicated IST1 emergency stack.
 - PS/2 input is delivered through an ACPI-aware I/O-APIC route into a bounded
   interrupt-safe queue, with polling retained as a hardware fallback.
+- A bounded Rust RAM filesystem provides a first volatile file namespace with
+  checked paths and create, read, enumerate, replace, and remove operations.
 
 ## What is *not* implemented yet?
 
 The pre-boot monitor still uses UEFI keyboard input. The post-boot monitor owns
 its input path, but USB keyboards are not supported yet; physical machines whose
 firmware does not expose a PS/2-compatible keyboard will need an xHCI/USB HID
-driver. There is no scheduler, filesystem, userspace, networking, or SMP startup.
+driver. There is no persistent disk filesystem, scheduler, userspace, networking,
+or SMP startup.
 Runtime Services memory is preserved, but the kernel does not call Runtime
 Services after the handoff.
 
@@ -74,9 +77,9 @@ CI performs the same freestanding build with warnings treated as errors, creates
 a FAT32 boot image, boots it with QEMU/OVMF, enters `boot`, and requires explicit
 post-firmware, allocator, paging, guard-page, TSS/IST, APIC-timer, and
 kernel-shell markers. It drives COM1 commands, injects a QEMU hardware key
-sequence through the PS/2 IRQ path, and verifies allocator invariants. Separate
-negative boots require breakpoint, stack-guard page-fault, and double-fault
-diagnostics.
+sequence through the PS/2 IRQ path, verifies allocator invariants, and performs a
+RAMFS write/read/remove/not-found round trip. Separate negative boots require
+breakpoint, stack-guard page-fault, and double-fault diagnostics.
 
 The media creation, OVMF discovery, serial synchronization, and shell probes are
 implemented by `tools/argus.py` instead of inline CI shell/Expect logic.
@@ -152,6 +155,11 @@ heaptest
 memtest
 alloc 4096
 modules
+fs
+ls
+cat /README
+write /notes Rust owns this file
+rm /notes
 ticks
 input
 irqtest
@@ -184,6 +192,9 @@ src/memory.c    freestanding memset/memcpy/memmove primitives
 src/module_abi.h versioned cross-language descriptor and function contract
 src/module.c     C-side module validation, registry, and boot self-test
 src/rust_probe.rs bounded no_std checksum module behind ABI v1
+src/ramfs_abi.h versioned C/Rust RAMFS descriptor and status contract
+src/ramfs.c      C-owned RAMFS state, validation, tests, and shell-facing wrapper
+src/rust_ramfs.rs bounded no_std RAMFS path and file-state implementation
 src/uefi_memory.c reusable memory-map allocation and validation
 src/gop.c       GOP discovery and raw framebuffer pixel operations
 src/console.c   Argus framebuffer terminal + UEFI text fallback
@@ -192,17 +203,19 @@ src/cpu.S       CPU instructions, stack switch, and interrupt entry stubs
 Makefile        freestanding PE/COFF build
 tools/argus.py  FAT image creation and interactive QEMU smoke runner
 docs/module-abi-v1.md ownership, layout, failure, and versioning contract
+docs/ramfs-abi-v1.md RAMFS ownership, limits, paths, status, and validation contract
 ```
 
 ## Language policy
 
-- C owns the kernel, allocators, parsers, consoles, and early drivers.
+- C owns kernel integration, allocators, consoles, and early drivers.
 - x86-64 assembly is limited to instructions and transitions C cannot express safely.
 - Make coordinates the host build while Python owns stateful test orchestration.
 - Python owns image construction and QEMU test orchestration on the host; it is
   not part of the boot image.
-- Rust is restricted to bounded `no_std` modules behind the documented C ABI.
-  The first module is a stateless checksum probe with no allocator or hardware access.
+- Rust is restricted to bounded `no_std` components behind documented C ABIs.
+  It currently owns a stateless checksum and the fixed-capacity RAMFS path/file
+  state machine, with no allocator or hardware access.
 - Boot, page tables, allocators, interrupt control, and device ownership remain
   in C and x86-64 assembly until a later ABI explicitly and safely exposes them.
 - Do not add languages merely by subsystem count: every language adds a
@@ -300,11 +313,21 @@ Implemented:
 - QEMU control-socket key injection that proves an IRQ-delivered shell command
 - Python negative boots for breakpoint, guard-page, and true double-fault diagnostics
 
-### Stage I — next: storage/files
-Recommended order:
+### Stage I — started in v0.9: storage/files
 
-1. simple RAM filesystem
-2. FAT32 reader
+Implemented:
+
+- a fixed-capacity, allocator-free Rust RAMFS behind ABI v1
+- absolute-path validation rejecting empty, repeated, `.` and `..` segments
+- create/replace, read, enumeration, removal, and slot-reuse behavior
+- C-owned aligned opaque state with no ownership transfer across the ABI
+- `fs`, `ls`, `cat`, `write`, and `rm` native-shell commands
+- boot-time exhaustion/bounds/path tests and a QEMU command-level round trip
+
+Recommended next order:
+
+1. C-owned block-device interface with an in-memory fixture
+2. read-only Rust FAT32 parser behind a new bounded parser ABI
 3. AHCI/SATA exploration
 4. NVMe driver
 
@@ -328,7 +351,7 @@ At that point ArgusOS is becoming a conventional kernel rather than a firmware m
 5. Replace per-character fallback `OutputString` calls with buffered CHAR16 strings.
 6. Replace the uppercase-only 5x7 glyph set with a complete 8x16 terminal font.
 7. Add command history and cursor editing to the native kernel monitor.
-8. Add a RAM-backed virtual filesystem with bounded path parsing.
+8. Add directory-aware RAMFS enumeration without changing ABI v1.
 9. Add a read-only FAT32 parser over an in-memory block-device fixture.
 
 ## Important distinction
@@ -337,5 +360,6 @@ Call this version an **early UEFI-loaded kernel with a native post-boot
 monitor**. The initial monitor is firmware-backed; the monitor reached through
 `boot` owns its stack, page tables, heap, interrupt handling, console, and input,
 and no longer uses Boot Services. Guard pages and an IST-backed double-fault path
-contain early stack failures. It is a real kernel boundary, while still being
-far from a general-purpose OS.
+contain early stack failures, while a volatile Rust RAMFS supplies the first file
+namespace. It is a real kernel boundary, while still being far from a
+general-purpose OS.

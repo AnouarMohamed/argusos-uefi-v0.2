@@ -5,6 +5,7 @@
 #include "kconsole.h"
 #include "module.h"
 #include "pmm.h"
+#include "ramfs.h"
 
 extern void cpu_halt_forever(void) __attribute__((noreturn));
 extern void cpu_trigger_breakpoint(void);
@@ -45,6 +46,11 @@ static void print_help(void) {
     kconsole_write("  memtest      rerun PMM + heap hardening tests\n");
     kconsole_write("  alloc N      allocate, verify, and free N bytes\n");
     kconsole_write("  modules      validated kernel modules\n");
+    kconsole_write("  fs           Rust RAMFS statistics\n");
+    kconsole_write("  ls           list RAMFS files\n");
+    kconsole_write("  cat PATH     print a RAMFS file\n");
+    kconsole_write("  write P TEXT create or replace a RAMFS file\n");
+    kconsole_write("  rm PATH      remove a RAMFS file\n");
     kconsole_write("  ticks        local-APIC timer ticks\n");
     kconsole_write("  input        native input backends\n");
     kconsole_write("  irqtest      confirm IRQ keyboard command delivery\n");
@@ -59,7 +65,7 @@ static void print_status(
     const acpi_info_t *acpi,
     const paging_info_t *paging
 ) {
-    kconsole_write("\nArgusOS kernel v0.8\n");
+    kconsole_write("\nArgusOS kernel v0.9\n");
     kconsole_write("Boot Services: exited\nCPUs: ");
     kconsole_write_dec(acpi->enabled_cpu_count);
     kconsole_write("\nCR3: ");
@@ -85,14 +91,102 @@ static void print_modules(void) {
     kconsole_write_dec(count);
     kconsole_write("\n");
     for (uint64_t i = 0; i < count; ++i) {
-        const argus_module_v1_t *module = module_at(i);
         kconsole_write("  ");
-        kconsole_write(module->name);
+        kconsole_write(module_name_at(i));
         kconsole_write(" (ABI ");
-        kconsole_write_dec(module->abi_version);
+        kconsole_write_dec(module_abi_version_at(i));
         kconsole_write(")\n");
     }
     kconsole_write("MODULES_OK\n");
+}
+
+static void print_ramfs_error(int32_t status) {
+    kconsole_write("RAMFS error: ");
+    if (status == ARGUS_RAMFS_NOT_FOUND) kconsole_write("not found");
+    else if (status == ARGUS_RAMFS_INVALID) kconsole_write("invalid path or argument");
+    else if (status == ARGUS_RAMFS_NO_SPACE) kconsole_write("capacity exhausted");
+    else if (status == ARGUS_RAMFS_BUFFER_TOO_SMALL) kconsole_write("buffer too small");
+    else kconsole_write("ABI failure");
+    kconsole_write("\n");
+}
+
+static void print_ramfs_status(void) {
+    const argus_ramfs_v1_t *descriptor = ramfs_descriptor();
+    kconsole_write("Driver: ");
+    kconsole_write(descriptor ? descriptor->name : "unavailable");
+    kconsole_write("\nFiles: ");
+    kconsole_write_dec(ramfs_file_count());
+    kconsole_write(" / ");
+    kconsole_write_dec(ramfs_capacity());
+    kconsole_write("\nMaximum file bytes: ");
+    kconsole_write_dec(ramfs_max_file_size());
+    kconsole_write("\nRAMFS_STATUS_OK\n");
+}
+
+static void list_ramfs(void) {
+    char path[ARGUS_RAMFS_MAX_PATH + 1u];
+    uint64_t path_length;
+    uint64_t data_length;
+    uint64_t count = ramfs_file_count();
+    for (uint64_t index = 0; index < count; ++index) {
+        int32_t status = ramfs_entry(
+            index,
+            path,
+            sizeof(path),
+            &path_length,
+            &data_length
+        );
+        if (status != ARGUS_RAMFS_OK) {
+            print_ramfs_error(status);
+            return;
+        }
+        kconsole_write(path);
+        kconsole_write("  ");
+        kconsole_write_dec(data_length);
+        kconsole_write(" bytes\n");
+    }
+    kconsole_write("RAMFS_LIST_OK\n");
+}
+
+static void cat_ramfs(const char *path) {
+    uint8_t data[ARGUS_RAMFS_MAX_DATA];
+    uint64_t length = 0;
+    int32_t status = ramfs_read(path, data, sizeof(data), &length);
+    if (status != ARGUS_RAMFS_OK) {
+        print_ramfs_error(status);
+        return;
+    }
+    for (uint64_t index = 0; index < length; ++index) {
+        uint8_t byte = data[index];
+        kconsole_putc(byte == '\n' || byte == '\t' ||
+                      (byte >= 32u && byte <= 126u) ? (char)byte : '.');
+    }
+    if (!length || data[length - 1u] != '\n') kconsole_putc('\n');
+    kconsole_write("RAMFS_CAT_OK\n");
+}
+
+static void write_ramfs(char *arguments) {
+    char *separator = arguments;
+    while (*separator && *separator != ' ') ++separator;
+    if (separator == arguments || !*separator) {
+        kconsole_write("usage: write PATH TEXT\n");
+        return;
+    }
+    *separator = 0;
+    const char *data = separator + 1;
+    uint64_t length = 0;
+    while (length <= ARGUS_RAMFS_MAX_DATA && data[length]) ++length;
+    int32_t status = length > ARGUS_RAMFS_MAX_DATA
+        ? ARGUS_RAMFS_NO_SPACE
+        : ramfs_write(arguments, (const uint8_t *)data, length);
+    if (status == ARGUS_RAMFS_OK) kconsole_write("RAMFS_WRITE_OK\n");
+    else print_ramfs_error(status);
+}
+
+static void remove_ramfs(const char *path) {
+    int32_t status = ramfs_remove(path);
+    if (status == ARGUS_RAMFS_OK) kconsole_write("RAMFS_REMOVE_OK\n");
+    else print_ramfs_error(status);
 }
 
 static void print_memory(void) {
@@ -153,6 +247,11 @@ static void execute_command(
             ? "ALLOCATOR_HARDENING_PASS\n" : "ALLOCATOR_HARDENING_FAIL\n");
     else if (starts_with(line, "alloc ")) allocation_probe(line + 6);
     else if (strings_equal(line, "modules")) print_modules();
+    else if (strings_equal(line, "fs")) print_ramfs_status();
+    else if (strings_equal(line, "ls")) list_ramfs();
+    else if (starts_with(line, "cat ")) cat_ramfs(line + 4);
+    else if (starts_with(line, "write ")) write_ramfs(line + 6);
+    else if (starts_with(line, "rm ")) remove_ramfs(line + 3);
     else if (strings_equal(line, "ticks")) {
         kconsole_write("APIC ticks: ");
         kconsole_write_dec(apic_timer_ticks());

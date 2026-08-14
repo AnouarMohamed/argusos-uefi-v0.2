@@ -29,6 +29,8 @@ BOOT_MARKERS = (
     b"ALLOCATOR_HARDENING_PASS",
     b"MODULE_ABI_V1_ONLINE",
     b"RUST_MODULE_SELF_TEST_PASS",
+    b"RAMFS_ABI_V1_ONLINE",
+    b"RUST_RAMFS_SELF_TEST_PASS",
     b"GDT_IDT_ONLINE",
     b"DOUBLE_FAULT_IST_ONLINE",
     b"APIC_TIMER_TICK",
@@ -41,6 +43,13 @@ SHELL_PROBES = (
     (b"alloc 4096\r", b"ALLOC_OK"),
     (b"memtest\r", b"ALLOCATOR_HARDENING_PASS"),
     (b"input\r", b"PS/2 mode: I/O APIC IRQ"),
+    (b"fs\r", b"RAMFS_STATUS_OK"),
+    (b"ls\r", b"RAMFS_LIST_OK"),
+    (b"cat /README\r", b"RAMFS_CAT_OK"),
+    (b"write /qemu.txt Rust RAMFS round trip\r", b"RAMFS_WRITE_OK"),
+    (b"cat /qemu.txt\r", b"Rust RAMFS round trip"),
+    (b"rm /qemu.txt\r", b"RAMFS_REMOVE_OK"),
+    (b"cat /qemu.txt\r", b"RAMFS error: not found"),
 )
 FAULT_CASES = {
     "breakpoint": (

@@ -8,6 +8,7 @@
 #include "module.h"
 #include "paging.h"
 #include "pmm.h"
+#include "ramfs.h"
 
 extern void cpu_pause(void);
 extern void cpu_trigger_breakpoint(void);
@@ -75,7 +76,7 @@ void kernel_exception_panic(
 void kernel_main(const boot_info_t *boot_info) {
     kconsole_clear();
 
-    kprint("ArgusOS kernel v0.8\n");
+    kprint("ArgusOS kernel v0.9\n");
     kprint("ARGUS_KERNEL_ONLINE\n");
 
     if (!boot_info || boot_info->magic != ARGUS_BOOT_INFO_MAGIC ||
@@ -143,11 +144,22 @@ void kernel_main(const boot_info_t *boot_info) {
     kprint("ALLOCATOR_HARDENING_PASS\n");
 
     if (!module_init()) panic("module ABI validation failed");
-    kprint("MODULE_ABI_V1_ONLINE\nRust module: ");
-    kprint(module_at(0)->name);
+    kprint("MODULE_ABI_V1_ONLINE\nRust components: ");
+    kprint_dec(module_count());
+    kprint("\nChecksum module: ");
+    kprint(module_name_at(0));
     kprint("\n");
     if (!module_self_test()) panic("Rust module self-test failed");
     kprint("RUST_MODULE_SELF_TEST_PASS\n");
+
+    if (!ramfs_init()) panic("Rust RAMFS ABI initialization failed");
+    kprint("RAMFS_ABI_V1_ONLINE\nRAMFS capacity: ");
+    kprint_dec(ramfs_capacity());
+    kprint(" files x ");
+    kprint_dec(ramfs_max_file_size());
+    kprint(" bytes\n");
+    if (!ramfs_self_test()) panic("Rust RAMFS self-test failed");
+    kprint("RUST_RAMFS_SELF_TEST_PASS\n");
 
     if (!arch_init()) panic("TSS/IDT initialization failed");
     kprint("GDT_IDT_ONLINE\n");

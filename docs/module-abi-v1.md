@@ -11,9 +11,13 @@ ABI v1 exists to prove that a separately compiled, freestanding module can be
 validated and called safely by the C kernel. It is an internal, statically linked
 ABI, not a userspace ABI and not a dynamic module loader.
 
-The first module exposes one FNV-1a checksum function. It does not participate in
+This descriptor exposes one FNV-1a checksum function. It does not participate in
 boot, page-table construction, allocation, interrupt dispatch, device I/O, or
 panic handling. Those remain C/assembly responsibilities.
+
+The later Rust RAMFS component uses a separate capability-specific descriptor,
+documented in [`ramfs-abi-v1.md`](ramfs-abi-v1.md), rather than expanding this
+frozen checksum ABI.
 
 ## Platform contract
 

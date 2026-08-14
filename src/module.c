@@ -1,6 +1,8 @@
 #include "module.h"
+#include "ramfs_abi.h"
 
-static const argus_module_v1_t *rust_module;
+static const argus_module_v1_t *checksum_module;
+static const argus_ramfs_v1_t *ramfs_module;
 
 static int valid_name(const char name[ARGUS_MODULE_NAME_CAPACITY]) {
     for (unsigned i = 0; i < ARGUS_MODULE_NAME_CAPACITY; ++i) {
@@ -18,6 +20,16 @@ static int valid_descriptor(const argus_module_v1_t *module) {
            valid_name(module->name) && module->checksum;
 }
 
+static int valid_ramfs_descriptor(const argus_ramfs_v1_t *module) {
+    return module && module->abi_version == ARGUS_RAMFS_ABI_VERSION &&
+           module->struct_size == sizeof(argus_ramfs_v1_t) &&
+           valid_name(module->name) && module->state_size != 0 &&
+           module->state_alignment != 0 && module->max_files != 0 &&
+           module->max_path != 0 && module->max_data != 0 &&
+           module->reserved == 0 && module->initialize && module->write &&
+           module->read && module->entry && module->remove;
+}
+
 static uint64_t reference_fnv1a(const uint8_t *bytes, uint64_t length) {
     uint64_t hash = 14695981039346656037ULL;
     for (uint64_t i = 0; i < length; ++i) {
@@ -28,9 +40,12 @@ static uint64_t reference_fnv1a(const uint8_t *bytes, uint64_t length) {
 }
 
 int module_init(void) {
-    rust_module = argus_rust_module_entry();
-    if (!valid_descriptor(rust_module)) {
-        rust_module = 0;
+    checksum_module = argus_rust_module_entry();
+    ramfs_module = argus_rust_ramfs_entry();
+    if (!valid_descriptor(checksum_module) ||
+        !valid_ramfs_descriptor(ramfs_module)) {
+        checksum_module = 0;
+        ramfs_module = 0;
         return 0;
     }
     return 1;
@@ -38,14 +53,27 @@ int module_init(void) {
 
 int module_self_test(void) {
     static const uint8_t probe[] = "ArgusOS module ABI v1";
-    if (!valid_descriptor(rust_module)) return 0;
+    if (!valid_descriptor(checksum_module) ||
+        !valid_ramfs_descriptor(ramfs_module))
+        return 0;
     uint64_t length = sizeof(probe) - 1u;
-    return rust_module->checksum(probe, length) == reference_fnv1a(probe, length) &&
-           rust_module->checksum(0, 0) == reference_fnv1a(0, 0);
+    return checksum_module->checksum(probe, length) ==
+               reference_fnv1a(probe, length) &&
+           checksum_module->checksum(0, 0) == reference_fnv1a(0, 0);
 }
 
-uint64_t module_count(void) { return rust_module ? 1u : 0u; }
+uint64_t module_count(void) {
+    return checksum_module && ramfs_module ? 2u : 0u;
+}
 
-const argus_module_v1_t *module_at(uint64_t index) {
-    return index == 0u ? rust_module : 0;
+const char *module_name_at(uint64_t index) {
+    if (index == 0u && checksum_module) return checksum_module->name;
+    if (index == 1u && ramfs_module) return ramfs_module->name;
+    return 0;
+}
+
+uint32_t module_abi_version_at(uint64_t index) {
+    if (index == 0u && checksum_module) return checksum_module->abi_version;
+    if (index == 1u && ramfs_module) return ramfs_module->abi_version;
+    return 0;
 }
