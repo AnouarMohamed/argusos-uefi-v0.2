@@ -1,0 +1,39 @@
+#ifndef ARGUS_APP_ABI_H
+#define ARGUS_APP_ABI_H
+
+#include <stdint.h>
+
+#define ARGUS_APP_ABI_VERSION 1u
+#define ARGUS_APP_PRESENT_MAGIC 0x41505031u
+
+#define ARGUS_APP_SURFACE_ADDRESS 0x0000008000400000ULL
+#define ARGUS_APP_SURFACE_WIDTH 320u
+#define ARGUS_APP_SURFACE_HEIGHT 224u
+#define ARGUS_APP_SURFACE_STRIDE ARGUS_APP_SURFACE_WIDTH
+#define ARGUS_APP_SURFACE_BYTES \
+    (ARGUS_APP_SURFACE_STRIDE * ARGUS_APP_SURFACE_HEIGHT)
+
+#define ARGUS_APP_ID_SNAKE 1u
+#define ARGUS_APP_ID_CALCULATOR 2u
+#define ARGUS_APP_ID_NOTES 3u
+
+#define ARGUS_APP_PALETTE_COUNT 8u
+enum {
+    ARGUS_APP_COLOR_TERMINAL = 0,
+    ARGUS_APP_COLOR_TEXT = 1,
+    ARGUS_APP_COLOR_CHROME = 2,
+    ARGUS_APP_COLOR_TITLE = 3,
+    ARGUS_APP_COLOR_LCD = 4,
+    ARGUS_APP_COLOR_LCD_INK = 5,
+    ARGUS_APP_COLOR_FIELD = 6,
+    ARGUS_APP_COLOR_HIGHLIGHT = 7,
+};
+
+typedef struct {
+    uint32_t magic;
+    uint32_t abi_version;
+    uint32_t sequence;
+    uint32_t flags;
+} argus_app_present_v1_t;
+
+#endif

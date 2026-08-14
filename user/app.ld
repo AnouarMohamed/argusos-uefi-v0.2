@@ -12,9 +12,9 @@ SECTIONS
     .data : { *(.data .data.*) }
     .bss (NOLOAD) : { *(.bss .bss.* COMMON) }
 
-    ASSERT(SIZEOF(.text) <= 0x4000, "Snake user image exceeds four code pages")
-    ASSERT(SIZEOF(.data) == 0, "Snake user image contains writable data")
-    ASSERT(SIZEOF(.bss) == 0, "Snake user image contains static storage")
+    ASSERT(SIZEOF(.text) <= 0x4000, "User app exceeds four code pages")
+    ASSERT(SIZEOF(.data) == 0, "User app contains writable data")
+    ASSERT(SIZEOF(.bss) == 0, "User app contains static storage")
 
     /DISCARD/ :
     {

@@ -1,67 +1,19 @@
+#include "app_runtime.h"
+#include "snake_game.h"
+#include "../src/app_abi.h"
 #include "../src/input_keys.h"
-#include "../src/snake_abi.h"
-#include "../src/user_abi.h"
-
-extern "C" void *memset(void *destination, int value, __SIZE_TYPE__ length) {
-    auto *bytes = static_cast<volatile unsigned char *>(destination);
-    for (__SIZE_TYPE__ index = 0; index < length; ++index)
-        bytes[index] = static_cast<unsigned char>(value);
-    return destination;
-}
 
 namespace {
 
 constexpr uint64_t kSnakePid = 3u;
 constexpr uint64_t kStepTicks = 12u;
 
-uint64_t syscall0(uint64_t number) {
-    register uint64_t result __asm__("rax") = number;
-    __asm__ volatile(
-        "syscall"
-        : "+a"(result)
-        :
-        : "rcx", "r11", "memory"
-    );
-    return result;
-}
-
-uint64_t syscall1(uint64_t number, uint64_t first) {
-    register uint64_t result __asm__("rax") = number;
-    register uint64_t argument __asm__("rdi") = first;
-    __asm__ volatile(
-        "syscall"
-        : "+a"(result)
-        : "D"(argument)
-        : "rcx", "r11", "memory"
-    );
-    return result;
-}
-
-uint64_t syscall2(uint64_t number, uint64_t first, uint64_t second) {
-    register uint64_t result __asm__("rax") = number;
-    register uint64_t argument1 __asm__("rdi") = first;
-    register uint64_t argument2 __asm__("rsi") = second;
-    __asm__ volatile(
-        "syscall"
-        : "+a"(result)
-        : "D"(argument1), "S"(argument2)
-        : "rcx", "r11", "memory"
-    );
-    return result;
-}
-
 class SnakeGame {
 public:
-    explicit SnakeGame(uint32_t seed) : random_state_(seed ? seed : 1u) {
-        reset();
-    }
+    explicit SnakeGame(uint32_t seed) : random_state_(seed ? seed : 1u) { reset(); }
 
-    void handle_input(uint64_t key) {
-        if (key == 'r' || key == 'R') {
-            reset();
-            dirty_ = true;
-            return;
-        }
+    void input(uint64_t key) {
+        if (key == 'r' || key == 'R') { reset(); return; }
         uint8_t next = direction_;
         if (key == 'w' || key == 'W' || key == ARGUS_KEY_UP) next = kUp;
         else if (key == 's' || key == 'S' || key == ARGUS_KEY_DOWN) next = kDown;
@@ -79,7 +31,6 @@ public:
         else if (direction_ == kDown) ++next_y;
         else if (direction_ == kLeft) --next_x;
         else ++next_x;
-
         if (next_x < 0 || next_y < 0 ||
             next_x >= static_cast<int>(ARGUS_SNAKE_GRID_WIDTH) ||
             next_y >= static_cast<int>(ARGUS_SNAKE_GRID_HEIGHT) ||
@@ -89,7 +40,6 @@ public:
             dirty_ = true;
             return;
         }
-
         bool ate = static_cast<uint8_t>(next_x) == food_x_ &&
                    static_cast<uint8_t>(next_y) == food_y_;
         uint32_t new_length = length_;
@@ -103,38 +53,48 @@ public:
         body_x_[0] = static_cast<uint8_t>(next_x);
         body_y_[0] = static_cast<uint8_t>(next_y);
         length_ = new_length;
-        if (ate) {
-            ++score_;
-            place_food();
-        }
+        if (ate) { ++score_; place_food(); }
         dirty_ = true;
     }
 
     bool dirty() const { return dirty_; }
 
-    void present() {
-        argus_snake_frame_v1_t frame{};
-        frame.magic = ARGUS_SNAKE_FRAME_MAGIC;
-        frame.abi_version = ARGUS_SNAKE_ABI_VERSION;
-        frame.sequence = ++sequence_;
-        frame.state = state_;
-        frame.score = score_;
-        frame.length = length_;
-        frame.width = ARGUS_SNAKE_GRID_WIDTH;
-        frame.height = ARGUS_SNAKE_GRID_HEIGHT;
+    void draw() {
+        argus::clear(ARGUS_APP_COLOR_LCD);
+        argus::text("SCORE", 8u, 8u, 1u, ARGUS_APP_COLOR_LCD_INK);
+        char score[12];
+        argus::unsigned_decimal(score_, score, sizeof(score));
+        argus::text(score, 50u, 8u, 1u, ARGUS_APP_COLOR_LCD_INK);
+        argus::text("ARROWS OR WASD   R RESET", 166u, 8u, 1u,
+                    ARGUS_APP_COLOR_LCD_INK);
+
+        constexpr uint32_t cell = 10u;
+        constexpr uint32_t board_width = ARGUS_SNAKE_GRID_WIDTH * cell + 2u;
+        constexpr uint32_t board_height = ARGUS_SNAKE_GRID_HEIGHT * cell + 2u;
+        constexpr uint32_t board_x = (ARGUS_APP_SURFACE_WIDTH - board_width) / 2u;
+        constexpr uint32_t board_y = 42u;
+        argus::frame(board_x, board_y, board_width, board_height,
+                     ARGUS_APP_COLOR_LCD_INK);
         for (uint32_t index = 0; index < length_; ++index) {
-            uint32_t cell = static_cast<uint32_t>(body_y_[index]) *
-                ARGUS_SNAKE_GRID_WIDTH + body_x_[index];
-            frame.cells[cell] = index == 0u
-                ? ARGUS_SNAKE_CELL_HEAD : ARGUS_SNAKE_CELL_BODY;
+            uint32_t x = board_x + 1u + body_x_[index] * cell;
+            uint32_t y = board_y + 1u + body_y_[index] * cell;
+            uint32_t inset = index == 0u ? 1u : 2u;
+            argus::rect(x + inset, y + inset, cell - inset * 2u,
+                        cell - inset * 2u, ARGUS_APP_COLOR_LCD_INK);
         }
-        frame.cells[static_cast<uint32_t>(food_y_) * ARGUS_SNAKE_GRID_WIDTH +
-                    food_x_] = ARGUS_SNAKE_CELL_FOOD;
-        (void)syscall2(
-            ARGUS_SYSCALL_SNAKE_PRESENT,
-            reinterpret_cast<uint64_t>(&frame),
-            sizeof(frame)
-        );
+        uint32_t food_x = board_x + 1u + food_x_ * cell;
+        uint32_t food_y = board_y + 1u + food_y_ * cell;
+        argus::frame(food_x + 2u, food_y + 2u, cell - 4u, cell - 4u,
+                     ARGUS_APP_COLOR_LCD_INK);
+        if (state_ == ARGUS_SNAKE_STATE_GAME_OVER) {
+            constexpr const char *message = "GAME OVER   R RESET";
+            uint32_t width = argus::text_width(message, 1u);
+            uint32_t x = (ARGUS_APP_SURFACE_WIDTH - width) / 2u;
+            argus::rect(x - 5u, 106u, width + 10u, 15u, ARGUS_APP_COLOR_LCD);
+            argus::frame(x - 5u, 106u, width + 10u, 15u,
+                         ARGUS_APP_COLOR_LCD_INK);
+            argus::text(message, x, 110u, 1u, ARGUS_APP_COLOR_LCD_INK);
+        }
         dirty_ = false;
     }
 
@@ -143,39 +103,30 @@ private:
     static constexpr uint8_t kRight = 1u;
     static constexpr uint8_t kDown = 2u;
     static constexpr uint8_t kLeft = 3u;
-
     static bool opposite(uint8_t first, uint8_t second) {
         return ((first + 2u) & 3u) == second;
     }
-
     uint32_t random() {
         random_state_ ^= random_state_ << 13;
         random_state_ ^= random_state_ >> 17;
         random_state_ ^= random_state_ << 5;
         return random_state_;
     }
-
     bool occupied(uint8_t x, uint8_t y, uint32_t count) const {
         for (uint32_t index = 0; index < count; ++index)
             if (body_x_[index] == x && body_y_[index] == y) return true;
         return false;
     }
-
     void place_food() {
         for (uint32_t attempt = 0; attempt < ARGUS_SNAKE_CELL_COUNT; ++attempt) {
-            uint32_t cell = random() % ARGUS_SNAKE_CELL_COUNT;
-            uint8_t x = static_cast<uint8_t>(cell % ARGUS_SNAKE_GRID_WIDTH);
-            uint8_t y = static_cast<uint8_t>(cell / ARGUS_SNAKE_GRID_WIDTH);
-            if (!occupied(x, y, length_)) {
-                food_x_ = x;
-                food_y_ = y;
-                return;
-            }
+            uint32_t position = random() % ARGUS_SNAKE_CELL_COUNT;
+            uint8_t x = static_cast<uint8_t>(position % ARGUS_SNAKE_GRID_WIDTH);
+            uint8_t y = static_cast<uint8_t>(position / ARGUS_SNAKE_GRID_WIDTH);
+            if (!occupied(x, y, length_)) { food_x_ = x; food_y_ = y; return; }
         }
         food_x_ = 0u;
         food_y_ = 0u;
     }
-
     void reset() {
         state_ = ARGUS_SNAKE_STATE_PLAYING;
         score_ = 0u;
@@ -195,7 +146,6 @@ private:
     uint8_t body_x_[ARGUS_SNAKE_MAX_LENGTH]{};
     uint8_t body_y_[ARGUS_SNAKE_MAX_LENGTH]{};
     uint32_t random_state_;
-    uint32_t sequence_ = 0u;
     uint32_t state_ = ARGUS_SNAKE_STATE_PLAYING;
     uint32_t score_ = 0u;
     uint32_t length_ = 0u;
@@ -210,26 +160,25 @@ private:
 
 extern "C" [[noreturn]] __attribute__((section(".text.start")))
 void argus_user_start(uint64_t pid) {
-    if (pid != kSnakePid || syscall0(ARGUS_SYSCALL_GETPID) != pid)
-        (void)syscall1(ARGUS_SYSCALL_EXIT, 1u);
-
-    uint64_t now = syscall0(ARGUS_SYSCALL_CLOCK_TICKS);
+    if (pid != kSnakePid || argus::pid() != pid) argus::exit(1u);
+    uint64_t now = argus::ticks();
     SnakeGame game(static_cast<uint32_t>(now ^ (pid * 0x9E3779B9u)));
-    game.present();
+    uint32_t sequence = 0u;
     uint64_t previous_step = now;
-
+    game.draw();
+    if (!argus::present(++sequence)) argus::exit(2u);
     for (;;) {
         for (;;) {
-            uint64_t key = syscall0(ARGUS_SYSCALL_INPUT_POLL);
+            uint64_t key = argus::input_poll();
             if (!key) break;
-            game.handle_input(key);
+            game.input(key);
         }
-        now = syscall0(ARGUS_SYSCALL_CLOCK_TICKS);
+        now = argus::ticks();
         if (now - previous_step >= kStepTicks) {
             previous_step = now;
             game.step();
         }
-        if (game.dirty()) game.present();
-        (void)syscall0(ARGUS_SYSCALL_YIELD);
+        if (game.dirty()) { game.draw(); (void)argus::present(++sequence); }
+        argus::yield();
     }
 }

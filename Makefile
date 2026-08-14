@@ -54,7 +54,7 @@ build/block.obj: src/block.c src/block.h | build
 build/compositor.obj: src/compositor.c src/compositor.h src/gop.h src/surface.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-build/desktop.obj: src/desktop.c src/desktop.h src/apic.h src/compositor.h src/console.h src/fat32.h src/gop.h src/heap.h src/input.h src/pmm.h src/process.h src/ramfs.h src/snake_abi.h src/surface.h | build
+build/desktop.obj: src/desktop.c src/desktop.h src/apic.h src/app_abi.h src/compositor.h src/console.h src/fat32.h src/gop.h src/heap.h src/input.h src/pmm.h src/process.h src/ramfs.h src/surface.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/arch.obj: src/arch.c src/arch.h src/apic.h src/kernel.h | build
@@ -105,7 +105,7 @@ build/pci.obj: src/pci.c src/pci.h | build
 build/pmm.obj: src/pmm.c src/pmm.h src/boot_info.h src/uefi_memory.h src/efi.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-build/process.obj: src/process.c src/process.h src/apic.h src/arch.h src/input_keys.h src/paging.h src/pmm.h src/serial.h src/snake_abi.h src/user_abi.h | build
+build/process.obj: src/process.c src/process.h src/apic.h src/app_abi.h src/arch.h src/input_keys.h src/paging.h src/pmm.h src/serial.h src/user_abi.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/ps2.obj: src/ps2.c src/ps2.h src/acpi.h src/apic.h src/arch.h src/input_keys.h | build
@@ -120,18 +120,43 @@ build/uefi_memory.obj: src/uefi_memory.c src/uefi_memory.h src/efi.h | build
 build/cpu.obj: src/cpu.S | build
 	$(CLANG) -target x86_64-pc-win32-coff -c $< -o $@
 
-build/user_snake.o: user/snake.cpp src/input_keys.h src/snake_abi.h src/user_abi.h | build
+build/user_app_runtime.o: user/app_runtime.cpp user/app_runtime.h src/app_abi.h src/user_abi.h | build
 	$(USER_CXX) $(USER_CXXFLAGS) -c $< -o $@
 
-build/user_snake.elf: build/user_snake.o user/snake.ld
-	$(LD_LLD) -nostdlib -static -T user/snake.ld $< -o $@
+build/user_snake.o: user/snake.cpp user/app_runtime.h user/snake_game.h src/app_abi.h src/input_keys.h | build
+	$(USER_CXX) $(USER_CXXFLAGS) -c $< -o $@
+
+build/user_calculator.o: user/calculator.cpp user/app_runtime.h src/app_abi.h | build
+	$(USER_CXX) $(USER_CXXFLAGS) -c $< -o $@
+
+build/user_notes.o: user/notes.cpp user/app_runtime.h src/app_abi.h | build
+	$(USER_CXX) $(USER_CXXFLAGS) -c $< -o $@
+
+build/user_snake.elf: build/user_snake.o build/user_app_runtime.o user/app.ld
+	$(LD_LLD) -nostdlib -static -T user/app.ld build/user_snake.o build/user_app_runtime.o -o $@
+
+build/user_calculator.elf: build/user_calculator.o build/user_app_runtime.o user/app.ld
+	$(LD_LLD) -nostdlib -static -T user/app.ld build/user_calculator.o build/user_app_runtime.o -o $@
+
+build/user_notes.elf: build/user_notes.o build/user_app_runtime.o user/app.ld
+	$(LD_LLD) -nostdlib -static -T user/app.ld build/user_notes.o build/user_app_runtime.o -o $@
 
 build/user_snake.bin: build/user_snake.elf
 	$(OBJCOPY) --only-section=.text -O binary $< $@
 	test "$$(wc -c < $@)" -gt 0
 	test "$$(wc -c < $@)" -le 16384
 
-build/user_images.obj: src/user_images.S build/user_snake.bin | build
+build/user_calculator.bin: build/user_calculator.elf
+	$(OBJCOPY) --only-section=.text -O binary $< $@
+	test "$$(wc -c < $@)" -gt 0
+	test "$$(wc -c < $@)" -le 16384
+
+build/user_notes.bin: build/user_notes.elf
+	$(OBJCOPY) --only-section=.text -O binary $< $@
+	test "$$(wc -c < $@)" -gt 0
+	test "$$(wc -c < $@)" -le 16384
+
+build/user_images.obj: src/user_images.S build/user_snake.bin build/user_calculator.bin build/user_notes.bin | build
 	$(CLANG) -target x86_64-pc-win32-coff -c $< -o $@
 
 build/gop.obj: src/gop.c src/gop.h src/efi.h | build

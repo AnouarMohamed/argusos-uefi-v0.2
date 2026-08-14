@@ -52,12 +52,18 @@ BOOT_MARKERS = (
     b"COOPERATIVE_SCHEDULER_PASS",
     b"USER_PROCESS_SELF_TEST_PASS",
     b"CPP_USERSPACE_ONLINE",
+    b"APP_SURFACE_ABI_V1_ONLINE",
     b"SNAKE_USER_APP_ONLINE",
+    b"CALCULATOR_USER_APP_ONLINE",
+    b"NOTES_USER_APP_ONLINE",
     b"DESKTOP_UI_ONLINE",
     b"SURFACE_SELF_TEST_PASS",
     b"COMPOSITOR_ONLINE",
     b"DESKTOP_APPS_ONLINE",
     b"SNAKE_APP_ONLINE",
+    b"CALCULATOR_APP_ONLINE",
+    b"NOTES_APP_ONLINE",
+    b"APPLICATION_LAUNCHER_ONLINE",
     b"PS2_IRQ_ONLINE",
     b"PS2_MOUSE_IRQ_ONLINE",
     b"KERNEL_SHELL_READY",
@@ -70,6 +76,7 @@ SHELL_PROBES = (
     (b"modules\r", b"MODULES_OK"),
     (b"processes\r", b"USERSPACE_STATUS_OK"),
     (b"snake\r", b"SNAKE_FRAME_OK"),
+    (b"userapps\r", b"USER_APPS_OK"),
     (b"alloc 4096\r", b"ALLOC_OK"),
     (b"memtest\r", b"ALLOCATOR_HARDENING_PASS"),
     (b"input\r", b"PS/2 mode: I/O APIC IRQ"),
@@ -436,49 +443,69 @@ def run_smoke(args: argparse.Namespace) -> None:
         session.expect(b"PS2_IRQ_INPUT_OK", args.timeout)
         session.expect(b"argus-kernel> ", args.timeout)
 
-        qmp.move_pointer(0, -280)
-        time.sleep(0.05)
-        qmp.pointer_button("left", True)
-        time.sleep(0.05)
-        qmp.move_pointer(80, 60)
-        time.sleep(0.05)
-        qmp.pointer_button("left", False)
-        time.sleep(0.05)
-        session.send(b"ui\r")
-        session.expect(b"DESKTOP_DRAG_OK", args.timeout)
-        session.expect(b"COMPOSITOR_DAMAGE_OK", args.timeout)
+        session.send(b"focus apps\r")
+        session.expect(b"APP_FOCUS_OK", args.timeout)
         session.expect(b"argus-kernel> ", args.timeout)
-
-        args.drag_screenshot.parent.mkdir(parents=True, exist_ok=True)
-        qmp.execute("screendump", {"filename": str(args.drag_screenshot.resolve())})
-        if not args.drag_screenshot.is_file():
-            raise ToolError("QEMU did not create the dragged-window screenshot")
-        verify_desktop_capture(args.drag_screenshot)
-
-        qmp.move_pointer(180, -110)
-        time.sleep(0.05)
-        qmp.pointer_button("left", True)
-        time.sleep(0.05)
-        qmp.pointer_button("left", False)
-        time.sleep(0.05)
         session.send(b"apps\r")
-        session.expect(b"Active app: SYSTEM", args.timeout)
+        session.expect(b"Active app: APPLICATIONS", args.timeout)
         session.expect(b"COMPOSITOR_APPS_OK", args.timeout)
         session.expect(b"argus-kernel> ", args.timeout)
 
         args.apps_screenshot.parent.mkdir(parents=True, exist_ok=True)
         qmp.execute("screendump", {"filename": str(args.apps_screenshot.resolve())})
         if not args.apps_screenshot.is_file():
-            raise ToolError("QEMU did not create the focused-app screenshot")
+            raise ToolError("QEMU did not create the Applications screenshot")
         verify_desktop_capture(args.apps_screenshot)
+
+        qmp.send_key("5")
+        time.sleep(0.35)
+        session.send(b"apps\r")
+        session.expect(b"Active app: CALCULATOR", args.timeout)
+        session.expect(b"COMPOSITOR_APPS_OK", args.timeout)
+        session.expect(b"argus-kernel> ", args.timeout)
+        for key in ("1", "2", "shift-equal", "3", "ret"):
+            qmp.send_key(key)
+            time.sleep(0.15)
+        time.sleep(0.25)
+        session.send(b"userapps\r")
+        session.expect(b"CALCULATOR_INPUT_OK", args.timeout)
+        session.expect(b"USER_APPS_OK", args.timeout)
+        session.expect(b"argus-kernel> ", args.timeout)
+
+        args.calculator_screenshot.parent.mkdir(parents=True, exist_ok=True)
+        qmp.execute(
+            "screendump",
+            {"filename": str(args.calculator_screenshot.resolve())},
+        )
+        if not args.calculator_screenshot.is_file():
+            raise ToolError("QEMU did not create the Calculator screenshot")
+        verify_snake_capture(args.calculator_screenshot)
+
+        session.send(b"focus notes\r")
+        session.expect(b"APP_FOCUS_OK", args.timeout)
+        session.expect(b"argus-kernel> ", args.timeout)
+        for key in ("a", "r", "g", "u", "s", "spc", "n", "o", "t", "e", "s"):
+            qmp.send_key(key)
+            time.sleep(0.12)
+        time.sleep(0.25)
+        session.send(b"userapps\r")
+        session.expect(b"NOTES_INPUT_OK", args.timeout)
+        session.expect(b"USER_APPS_OK", args.timeout)
+        session.expect(b"argus-kernel> ", args.timeout)
+
+        args.notes_screenshot.parent.mkdir(parents=True, exist_ok=True)
+        qmp.execute("screendump", {"filename": str(args.notes_screenshot.resolve())})
+        if not args.notes_screenshot.is_file():
+            raise ToolError("QEMU did not create the Notes screenshot")
+        verify_desktop_capture(args.notes_screenshot)
 
         session.send(b"focus snake\r")
         session.expect(b"APP_FOCUS_OK", args.timeout)
         session.expect(b"argus-kernel> ", args.timeout)
         qmp.send_key("r")
-        time.sleep(0.05)
-        qmp.send_key("down")
         time.sleep(0.15)
+        qmp.send_key("down")
+        time.sleep(0.35)
         session.send(b"snake\r")
         session.expect(b"SNAKE_INPUT_OK", args.timeout)
         session.expect(b"CPP_USER_APP_OK", args.timeout)
@@ -507,8 +534,9 @@ def run_smoke(args: argparse.Namespace) -> None:
 
     print(
         f"\nArgusOS smoke test passed; transcript: {args.log}; "
-        f"framebuffer: {args.screenshot}; dragged: {args.drag_screenshot}; "
-        f"apps: {args.apps_screenshot}; snake: {args.snake_screenshot}"
+        f"framebuffer: {args.screenshot}; apps: {args.apps_screenshot}; "
+        f"calculator: {args.calculator_screenshot}; "
+        f"notes: {args.notes_screenshot}; snake: {args.snake_screenshot}"
     )
 
 
@@ -564,16 +592,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="framebuffer capture after the kernel shell becomes ready",
     )
     smoke.add_argument(
-        "--drag-screenshot",
+        "--calculator-screenshot",
         type=Path,
-        default=Path("build/qemu-desktop-dragged.ppm"),
-        help="framebuffer capture after the pointer drag probe",
+        default=Path("build/qemu-desktop-calculator.ppm"),
+        help="framebuffer capture after exercising Calculator",
     )
     smoke.add_argument(
         "--apps-screenshot",
         type=Path,
         default=Path("build/qemu-desktop-apps.ppm"),
-        help="framebuffer capture after focusing a utility app",
+        help="framebuffer capture of the Applications launcher",
+    )
+    smoke.add_argument(
+        "--notes-screenshot",
+        type=Path,
+        default=Path("build/qemu-desktop-notes.ppm"),
+        help="framebuffer capture after editing a note",
     )
     smoke.add_argument(
         "--snake-screenshot",

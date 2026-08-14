@@ -57,6 +57,7 @@ static void print_help(void) {
     kconsole_write("  modules      validated kernel modules\n");
     kconsole_write("  processes    user process and scheduler state\n");
     kconsole_write("  snake        C++ user game state\n");
+    kconsole_write("  userapps     ring-3 application state\n");
     kconsole_write("  fs           Rust RAMFS statistics\n");
     kconsole_write("  ls           list RAMFS files\n");
     kconsole_write("  cat PATH     print a RAMFS file\n");
@@ -72,7 +73,7 @@ static void print_help(void) {
     kconsole_write("  input        native input backends\n");
     kconsole_write("  irqtest      confirm IRQ keyboard command delivery\n");
     kconsole_write("  apps         surfaces and active application\n");
-    kconsole_write("  focus NAME   focus console, system, files, or snake\n");
+    kconsole_write("  focus NAME   focus an installed desktop application\n");
     kconsole_write("  ui           pointer and compositor state\n");
     kconsole_write("  desktop      redraw the framebuffer desktop\n");
     kconsole_write("  clear        clear framebuffer/terminal\n");
@@ -86,7 +87,7 @@ static void print_status(
     const acpi_info_t *acpi,
     const paging_info_t *paging
 ) {
-    kconsole_write("\nArgusOS kernel v0.16\n");
+    kconsole_write("\nArgusOS kernel v0.17\n");
     kconsole_write("Boot Services: exited\nCPUs: ");
     kconsole_write_dec(acpi->enabled_cpu_count);
     kconsole_write("\nCR3: ");
@@ -122,25 +123,42 @@ static void print_modules(void) {
 }
 
 static void print_snake_status(void) {
-    argus_snake_frame_v1_t frame;
-    if (!process_snake_online() || !process_snake_frame(&frame)) {
+    const uint8_t *pixels;
+    uint32_t sequence;
+    if (!process_app_online(ARGUS_APP_ID_SNAKE) ||
+        !process_app_surface(ARGUS_APP_ID_SNAKE, &pixels, &sequence)) {
         kconsole_write("Snake user app: unavailable\nSNAKE_FRAME_FAIL\n");
         return;
     }
-    kconsole_write("Snake user app: C++ ring 3\nState: ");
-    kconsole_write(frame.state == ARGUS_SNAKE_STATE_PLAYING
-        ? "playing" : "game over");
-    kconsole_write("\nScore: ");
-    kconsole_write_dec(frame.score);
-    kconsole_write("\nLength: ");
-    kconsole_write_dec(frame.length);
-    kconsole_write("\nFrame: ");
-    kconsole_write_dec(frame.sequence);
+    (void)pixels;
+    kconsole_write("Snake user app: C++ ring 3\nFrame: ");
+    kconsole_write_dec(sequence);
     kconsole_write("\nInputs delivered: ");
-    kconsole_write_dec(process_snake_input_count());
-    kconsole_write(process_snake_input_count()
+    kconsole_write_dec(process_app_input_count(ARGUS_APP_ID_SNAKE));
+    kconsole_write(process_app_input_count(ARGUS_APP_ID_SNAKE)
         ? "\nSNAKE_INPUT_OK\n" : "\nSNAKE_INPUT_IDLE\n");
     kconsole_write("CPP_USER_APP_OK\nSNAKE_FRAME_OK\n");
+}
+
+static void print_user_apps(void) {
+    kconsole_write("User applications: ");
+    kconsole_write_dec(process_app_count());
+    kconsole_write("\nSnake: ");
+    kconsole_write(process_app_online(ARGUS_APP_ID_SNAKE) ? "online" : "offline");
+    kconsole_write("\nCalculator: ");
+    kconsole_write(process_app_online(ARGUS_APP_ID_CALCULATOR)
+        ? "online" : "offline");
+    kconsole_write("\nNotes: ");
+    kconsole_write(process_app_online(ARGUS_APP_ID_NOTES) ? "online" : "offline");
+    kconsole_write("\nCalculator inputs: ");
+    kconsole_write_dec(process_app_input_count(ARGUS_APP_ID_CALCULATOR));
+    kconsole_write(process_app_input_count(ARGUS_APP_ID_CALCULATOR)
+        ? "\nCALCULATOR_INPUT_OK" : "\nCALCULATOR_INPUT_IDLE");
+    kconsole_write("\nNotes inputs: ");
+    kconsole_write_dec(process_app_input_count(ARGUS_APP_ID_NOTES));
+    kconsole_write(process_app_input_count(ARGUS_APP_ID_NOTES)
+        ? "\nNOTES_INPUT_OK" : "\nNOTES_INPUT_IDLE");
+    kconsole_write("\nAPP_SURFACE_ABI_OK\nUSER_APPS_OK\n");
 }
 
 static void print_ramfs_error(int32_t status) {
@@ -450,12 +468,14 @@ static void execute_command(
         kconsole_write("\nAddress spaces: ");
         kconsole_write(process_address_space_isolated()
             ? "isolated" : "invalid");
-        kconsole_write("\nC++ app: ");
-        kconsole_write(process_snake_online() ? "snake (ring 3)" : "unavailable");
+        kconsole_write("\nC++ apps: ");
+        kconsole_write_dec(process_app_count());
+        kconsole_write(" (ring 3)");
         kconsole_write(process_scheduler_online()
             ? "\nUSERSPACE_STATUS_OK\n" : "\nUSERSPACE_STATUS_FAIL\n");
     }
     else if (strings_equal(line, "snake")) print_snake_status();
+    else if (strings_equal(line, "userapps")) print_user_apps();
     else if (strings_equal(line, "fs")) print_ramfs_status();
     else if (strings_equal(line, "ls")) list_ramfs();
     else if (starts_with(line, "cat ")) cat_ramfs(line + 4);
@@ -508,7 +528,8 @@ static void execute_command(
     }
     else if (starts_with(line, "focus "))
         kconsole_write(desktop_focus_app(line + 6)
-            ? "APP_FOCUS_OK\n" : "usage: focus console|system|files|snake\n");
+            ? "APP_FOCUS_OK\n" :
+              "usage: focus console|system|files|apps|snake|calc|notes\n");
     else if (strings_equal(line, "ui")) {
         kconsole_write("Pointer: ");
         kconsole_write(input_has_pointer() ? "online" : "unavailable");
@@ -563,8 +584,13 @@ void kernel_shell_run(
         serial_write("SURFACE_SELF_TEST_PASS\n");
         serial_write("COMPOSITOR_ONLINE\n");
         serial_write("DESKTOP_APPS_ONLINE\n");
-        serial_write(process_snake_online()
+        serial_write(process_app_online(ARGUS_APP_ID_SNAKE)
             ? "SNAKE_APP_ONLINE\n" : "SNAKE_APP_UNAVAILABLE\n");
+        serial_write(process_app_online(ARGUS_APP_ID_CALCULATOR)
+            ? "CALCULATOR_APP_ONLINE\n" : "CALCULATOR_APP_UNAVAILABLE\n");
+        serial_write(process_app_online(ARGUS_APP_ID_NOTES)
+            ? "NOTES_APP_ONLINE\n" : "NOTES_APP_UNAVAILABLE\n");
+        serial_write("APPLICATION_LAUNCHER_ONLINE\n");
     }
     serial_write(input_keyboard_uses_irq()
         ? "PS2_IRQ_ONLINE\n" : "PS2_POLLING_FALLBACK\n");

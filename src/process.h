@@ -2,11 +2,11 @@
 #define ARGUS_PROCESS_H
 
 #include "arch.h"
+#include "app_abi.h"
 #include "paging.h"
-#include "snake_abi.h"
 #include <stdint.h>
 
-#define ARGUS_PROCESS_MAX 4u
+#define ARGUS_PROCESS_MAX 8u
 
 typedef enum {
     ARGUS_PROCESS_UNUSED = 0,
@@ -26,10 +26,15 @@ uint64_t process_yield_count(void);
 uint64_t process_context_switch_count(void);
 int process_address_space_isolated(void);
 int process_scheduler_online(void);
-int process_snake_online(void);
-void process_snake_set_active(int active);
-int process_snake_input(uint8_t key);
-uint64_t process_snake_input_count(void);
-int process_snake_frame(argus_snake_frame_v1_t *frame);
+uint32_t process_app_count(void);
+int process_app_online(uint32_t app_id);
+void process_app_set_active(uint32_t app_id);
+int process_app_input(uint32_t app_id, uint8_t key);
+uint64_t process_app_input_count(uint32_t app_id);
+int process_app_surface(
+    uint32_t app_id,
+    const uint8_t **pixels,
+    uint32_t *sequence
+);
 
 #endif

@@ -12,7 +12,7 @@ build disables exceptions, RTTI, stack protectors, thread-safe statics, unwindin
 the red zone, SSE, and compiler builtin calls. It does not use the C++ standard
 library, dynamic allocation, global constructors, or writable static state.
 
-`user/snake.ld` links the image at `0x0000008000001000`, the code address shared by
+In v0.16, `user/snake.ld` linked the image at `0x0000008000001000`, the code address shared by
 Argus user spaces. Linker assertions reject code larger than four 4 KiB pages and
 reject `.data` or `.bss`. `objcopy` extracts the linked text and read-only data as a
 flat image, then `src/user_images.S` embeds those bytes in the EFI payload.
@@ -81,3 +81,7 @@ shared surface mapping, or dynamic process lifecycle yet.
 The next phase should generalize this proven path into an app channel with shared
 surfaces and events, then move the terminal behind it before relocating compositor
 ownership to a user-space display server.
+
+That generic surface and event phase was completed in v0.17. See
+`docs/user-apps-v0.17.md`; `user/app.ld` now replaces the original Snake-only
+linker script.

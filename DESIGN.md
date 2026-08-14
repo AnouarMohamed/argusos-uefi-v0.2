@@ -64,6 +64,18 @@ components:
     typography: "{typography.body}"
     rounded: "{rounded.square}"
     padding: "8px"
+  application-window:
+    backgroundColor: "{colors.terminal-ink}"
+    textColor: "{colors.terminal-text}"
+    typography: "{typography.body}"
+    rounded: "{rounded.square}"
+    padding: "8px"
+  launcher-window:
+    backgroundColor: "{colors.terminal-ink}"
+    textColor: "{colors.terminal-text}"
+    typography: "{typography.body}"
+    rounded: "{rounded.square}"
+    padding: "8px"
 ---
 
 # Design System: ArgusOS Desktop
@@ -174,8 +186,15 @@ highlight and one shadow line. Never stack ornamental borders.
 ### Navigation
 
 The bottom panel shows running tasks only. Each item must focus and raise its
-window. It does not contain a launcher or status copy until those surfaces are
-functional. Active items use an inverted bevel.
+window. `APPS` opens the functional Applications surface; no separate ornamental
+start control is added. Active items use an inverted bevel.
+
+### Applications Launcher
+
+Applications is a real launcher surface, not a web browser or static menu. It
+lists installed windows, distinguishes kernel services from user processes, and
+supports Up/Down plus Enter, 1-6 shortcuts, and clickable rows. Selection uses a
+single warm-chrome row with near-ink text.
 
 ### Terminal Window
 
@@ -196,6 +215,13 @@ Snake uses the same window frame, focus, task, and drag behavior as every other
 surface. Its content is a muted monochrome LCD field with block cells, one hollow
 food marker, score, compact keyboard controls, and an explicit game-over state.
 The title is simply `SNAKE`; no era or device branding appears in the UI.
+
+### User Application Windows
+
+Calculator and Notes use the same frame, focus, task, drag, and fixed content
+surface as Snake. Calculator uses the muted LCD pair only for its result field.
+Notes labels its unsaved state `VOLATILE MEMORY`; it must not imply persistence
+until filesystem access exists.
 
 ### Focus and Composition
 

@@ -1,19 +1,21 @@
 #include "process.h"
 #include "apic.h"
+#include "app_abi.h"
 #include "input_keys.h"
 #include "pmm.h"
 #include "serial.h"
 #include "user_abi.h"
 
 #define PROCESS_PROBE_COUNT 2u
-#define SNAKE_PROCESS_INDEX PROCESS_PROBE_COUNT
-#define SNAKE_PROCESS_PID 3u
+#define APP_PROCESS_COUNT 3u
+#define APP_PROCESS_FIRST PROCESS_PROBE_COUNT
 #define USER_CODE_OFFSET 0x1000ULL
 #define USER_CODE_MAX_PAGES 4u
 #define USER_STACK_OFFSET 0x200000ULL
+#define USER_SURFACE_OFFSET 0x400000ULL
 #define USER_SYSCALL_STACK_BYTES 32768u
 #define USER_WRITE_LIMIT 128u
-#define SNAKE_INPUT_CAPACITY 16u
+#define APP_INPUT_CAPACITY 32u
 #define X86_PAGE_WRITABLE (1ULL << 1)
 #define X86_PAGE_NO_EXECUTE (1ULL << 63)
 
@@ -24,8 +26,18 @@ typedef struct {
     uint64_t code_physical[USER_CODE_MAX_PAGES];
     uint32_t code_page_count;
     uint64_t stack_physical;
+    uint64_t surface_physical;
+    uint32_t surface_page_count;
     uint64_t code_virtual;
     uint64_t stack_virtual;
+    uint32_t app_id;
+    uint32_t present_sequence;
+    int present_valid;
+    int active;
+    uint8_t input[APP_INPUT_CAPACITY];
+    uint8_t input_head;
+    uint8_t input_tail;
+    uint64_t inputs_delivered;
     arch_user_context_t context;
     uint64_t exit_status;
     uint64_t yields;
@@ -35,6 +47,10 @@ extern uint8_t user_probe_start[];
 extern uint8_t user_probe_end[];
 extern uint8_t user_snake_start[];
 extern uint8_t user_snake_end[];
+extern uint8_t user_calculator_start[];
+extern uint8_t user_calculator_end[];
+extern uint8_t user_notes_start[];
+extern uint8_t user_notes_end[];
 
 static process_t processes[ARGUS_PROCESS_MAX];
 static const paging_info_t *kernel_paging;
@@ -49,23 +65,19 @@ static uint64_t write_count;
 static int address_spaces_isolated;
 static int scheduler_ready;
 static int process_self_test_passed;
-static int snake_online;
-static int snake_active;
-static argus_snake_frame_v1_t snake_frame;
-static int snake_frame_valid;
-static uint8_t snake_input[SNAKE_INPUT_CAPACITY];
-static uint8_t snake_input_head;
-static uint8_t snake_input_tail;
-static uint64_t snake_inputs_delivered;
 static uint8_t syscall_stack[USER_SYSCALL_STACK_BYTES]
     __attribute__((aligned(16)));
 
-_Static_assert((SNAKE_INPUT_CAPACITY & (SNAKE_INPUT_CAPACITY - 1u)) == 0,
-               "Snake input capacity must be a power of two");
-_Static_assert(sizeof(argus_snake_frame_v1_t) == 312u,
-               "Snake ABI frame layout changed");
+_Static_assert((APP_INPUT_CAPACITY & (APP_INPUT_CAPACITY - 1u)) == 0,
+               "App input capacity must be a power of two");
+_Static_assert(sizeof(argus_app_present_v1_t) == 16u,
+               "Application present ABI layout changed");
+_Static_assert(ARGUS_APP_SURFACE_BYTES == 71680u,
+               "Application surface dimensions changed");
 _Static_assert(ARGUS_USER_BASE + USER_CODE_OFFSET == 0x0000008000001000ULL,
                "C++ user link address must match the process image mapping");
+_Static_assert(ARGUS_USER_BASE + USER_SURFACE_OFFSET == ARGUS_APP_SURFACE_ADDRESS,
+               "App surface address must match its user mapping");
 
 static void zero_page(uint64_t physical) {
     uint8_t *bytes = (uint8_t *)(uintptr_t)physical;
@@ -79,12 +91,18 @@ static void release_process(process_t *process) {
         if (process->code_physical[index])
             (void)pmm_free_page(process->code_physical[index]);
     if (process->stack_physical) (void)pmm_free_page(process->stack_physical);
+    if (process->surface_physical && process->surface_page_count)
+        (void)pmm_release_pages(
+            process->surface_physical,
+            process->surface_page_count
+        );
     *process = (process_t){0};
 }
 
 static int load_user_image(
     process_t *process,
     uint64_t pid,
+    uint32_t app_id,
     const uint8_t *image_start,
     const uint8_t *image_end
 ) {
@@ -99,6 +117,7 @@ static int load_user_image(
 
     *process = (process_t){0};
     process->pid = pid;
+    process->app_id = app_id;
     if (!paging_user_space_create(kernel_paging, &process->address_space))
         return 0;
     process->code_virtual = process->address_space.user_base + USER_CODE_OFFSET;
@@ -145,6 +164,33 @@ static int load_user_image(
             0)) {
         release_process(process);
         return 0;
+    }
+
+    if (app_id) {
+        process->surface_page_count = (ARGUS_APP_SURFACE_BYTES +
+            ARGUS_PAGE_SIZE - 1u) / ARGUS_PAGE_SIZE;
+        process->surface_physical = pmm_alloc_pages(
+            process->surface_page_count
+        );
+        if (!process->surface_physical) {
+            release_process(process);
+            return 0;
+        }
+        for (uint32_t page = 0; page < process->surface_page_count; ++page) {
+            uint64_t physical = process->surface_physical +
+                (uint64_t)page * ARGUS_PAGE_SIZE;
+            zero_page(physical);
+            if (!paging_user_map_page(
+                    &process->address_space,
+                    process->address_space.user_base + USER_SURFACE_OFFSET +
+                        (uint64_t)page * ARGUS_PAGE_SIZE,
+                    physical,
+                    1,
+                    0)) {
+                release_process(process);
+                return 0;
+            }
+        }
     }
 
     process->context.rip = process->code_virtual;
@@ -221,13 +267,6 @@ int process_init(const paging_info_t *kernel_space) {
     address_spaces_isolated = 0;
     scheduler_ready = 0;
     process_self_test_passed = 0;
-    snake_online = 0;
-    snake_active = 0;
-    snake_frame = (argus_snake_frame_v1_t){0};
-    snake_frame_valid = 0;
-    snake_input_head = 0;
-    snake_input_tail = 0;
-    snake_inputs_delivered = 0;
     for (uint32_t index = 0; index < ARGUS_PROCESS_MAX; ++index)
         processes[index] = (process_t){0};
 
@@ -238,6 +277,7 @@ int process_init(const paging_info_t *kernel_space) {
         if (!load_user_image(
                 &processes[index],
                 index + 1u,
+                0u,
                 user_probe_start,
                 user_probe_end)) {
             for (uint32_t release = 0; release <= index; ++release)
@@ -268,38 +308,46 @@ static int user_range_readable(
     }
 }
 
-static int snake_frame_is_valid(const argus_snake_frame_v1_t *frame) {
-    if (!frame || frame->magic != ARGUS_SNAKE_FRAME_MAGIC ||
-        frame->abi_version != ARGUS_SNAKE_ABI_VERSION ||
-        frame->width != ARGUS_SNAKE_GRID_WIDTH ||
-        frame->height != ARGUS_SNAKE_GRID_HEIGHT ||
-        frame->length < 1u || frame->length > ARGUS_SNAKE_MAX_LENGTH ||
-        (frame->state != ARGUS_SNAKE_STATE_PLAYING &&
-         frame->state != ARGUS_SNAKE_STATE_GAME_OVER))
-        return 0;
-    uint32_t snake_cells = 0;
-    uint32_t heads = 0;
-    uint32_t food = 0;
-    for (uint32_t index = 0; index < ARGUS_SNAKE_CELL_COUNT; ++index) {
-        uint8_t cell = frame->cells[index];
-        if (cell > ARGUS_SNAKE_CELL_FOOD) return 0;
-        if (cell == ARGUS_SNAKE_CELL_BODY) ++snake_cells;
-        else if (cell == ARGUS_SNAKE_CELL_HEAD) {
-            ++snake_cells;
-            ++heads;
-        } else if (cell == ARGUS_SNAKE_CELL_FOOD) ++food;
-    }
-    return snake_cells == frame->length && heads == 1u && food == 1u;
+static uint64_t app_input_poll(process_t *process) {
+    if (!process || process->input_tail == process->input_head) return 0;
+    uint8_t key = process->input[process->input_tail];
+    process->input_tail = (uint8_t)(
+        (process->input_tail + 1u) & (APP_INPUT_CAPACITY - 1u)
+    );
+    ++process->inputs_delivered;
+    return key;
 }
 
-static uint64_t snake_input_poll(void) {
-    if (snake_input_tail == snake_input_head) return 0;
-    uint8_t key = snake_input[snake_input_tail];
-    snake_input_tail = (uint8_t)(
-        (snake_input_tail + 1u) & (SNAKE_INPUT_CAPACITY - 1u)
-    );
-    ++snake_inputs_delivered;
-    return key;
+static int app_surface_valid(const process_t *process) {
+    if (!process || !process->surface_physical) return 0;
+    const uint8_t *pixels =
+        (const uint8_t *)(uintptr_t)process->surface_physical;
+    for (uint32_t index = 0; index < ARGUS_APP_SURFACE_BYTES; ++index)
+        if (pixels[index] >= ARGUS_APP_PALETTE_COUNT) return 0;
+    return 1;
+}
+
+static int app_mapping_isolated(const process_t *process) {
+    if (!process || !process->app_id || !process->surface_physical) return 0;
+    uint64_t physical = 0;
+    uint64_t flags = 0;
+    uint64_t last_physical = 0;
+    return paging_user_translate(
+               &process->address_space,
+               ARGUS_APP_SURFACE_ADDRESS,
+               &physical,
+               &flags) &&
+           physical == process->surface_physical &&
+           (flags & X86_PAGE_WRITABLE) &&
+           (!process->address_space.nx_enabled ||
+               (flags & X86_PAGE_NO_EXECUTE)) &&
+           paging_user_translate(
+               &process->address_space,
+               ARGUS_APP_SURFACE_ADDRESS + ARGUS_APP_SURFACE_BYTES - 1u,
+               &last_physical,
+               0) &&
+           last_physical == process->surface_physical +
+               ARGUS_APP_SURFACE_BYTES - 1u;
 }
 
 uint64_t syscall_dispatch(arch_user_context_t *context) {
@@ -341,29 +389,32 @@ uint64_t syscall_dispatch(arch_user_context_t *context) {
             ++completed_processes;
             return ARCH_USER_ACTION_EXIT;
         case ARGUS_SYSCALL_CLOCK_TICKS:
-            context->rax = process->pid == SNAKE_PROCESS_PID
-                ? apic_timer_ticks() : UINT64_MAX;
+            context->rax = process->app_id ? apic_timer_ticks() : UINT64_MAX;
             return ARCH_USER_ACTION_RETURN;
         case ARGUS_SYSCALL_INPUT_POLL:
-            context->rax = process->pid == SNAKE_PROCESS_PID
-                ? snake_input_poll() : UINT64_MAX;
+            context->rax = process->app_id
+                ? app_input_poll(process) : UINT64_MAX;
             return ARCH_USER_ACTION_RETURN;
-        case ARGUS_SYSCALL_SNAKE_PRESENT: {
-            if (process->pid != SNAKE_PROCESS_PID ||
-                context->rsi != sizeof(argus_snake_frame_v1_t) ||
+        case ARGUS_SYSCALL_APP_PRESENT: {
+            if (!process->app_id ||
+                context->rsi != sizeof(argus_app_present_v1_t) ||
                 !user_range_readable(process, context->rdi, context->rsi)) {
                 context->rax = UINT64_MAX;
                 return ARCH_USER_ACTION_RETURN;
             }
-            const argus_snake_frame_v1_t *candidate =
-                (const argus_snake_frame_v1_t *)(uintptr_t)context->rdi;
-            if (!snake_frame_is_valid(candidate) ||
-                (snake_frame_valid && candidate->sequence <= snake_frame.sequence)) {
+            const argus_app_present_v1_t *request =
+                (const argus_app_present_v1_t *)(uintptr_t)context->rdi;
+            if (request->magic != ARGUS_APP_PRESENT_MAGIC ||
+                request->abi_version != ARGUS_APP_ABI_VERSION ||
+                request->flags != 0u || request->sequence == 0u ||
+                (process->present_valid &&
+                 request->sequence <= process->present_sequence) ||
+                !app_surface_valid(process)) {
                 context->rax = UINT64_MAX;
                 return ARCH_USER_ACTION_RETURN;
             }
-            snake_frame = *candidate;
-            snake_frame_valid = 1;
+            process->present_sequence = request->sequence;
+            process->present_valid = 1;
             context->rax = 0;
             return ARCH_USER_ACTION_RETURN;
         }
@@ -399,7 +450,7 @@ static int next_ready_process(uint32_t start) {
     for (uint32_t offset = 0; offset < configured_processes; ++offset) {
         uint32_t index = (start + offset) % configured_processes;
         if (processes[index].state != ARGUS_PROCESS_READY) continue;
-        if (index == SNAKE_PROCESS_INDEX && !snake_active) continue;
+        if (processes[index].app_id && !processes[index].active) continue;
         return (int)index;
     }
     return -1;
@@ -424,19 +475,32 @@ int process_run_self_test(void) {
         if (processes[index].state != ARGUS_PROCESS_EXITED ||
             processes[index].exit_status != 0 || processes[index].yields != 1u)
             return 0;
-    if (!address_spaces_isolated ||
-        !load_user_image(
-            &processes[SNAKE_PROCESS_INDEX],
-            SNAKE_PROCESS_PID,
-            user_snake_start,
-            user_snake_end))
-        return 0;
-    ++configured_processes;
-    if (!dispatch_process(SNAKE_PROCESS_INDEX) ||
-        processes[SNAKE_PROCESS_INDEX].state != ARGUS_PROCESS_READY ||
-        !snake_frame_valid)
-        return 0;
-    snake_online = 1;
+    if (!address_spaces_isolated) return 0;
+    const uint8_t *starts[APP_PROCESS_COUNT] = {
+        user_snake_start, user_calculator_start, user_notes_start
+    };
+    const uint8_t *ends[APP_PROCESS_COUNT] = {
+        user_snake_end, user_calculator_end, user_notes_end
+    };
+    for (uint32_t app = 0; app < APP_PROCESS_COUNT; ++app) {
+        uint32_t index = APP_PROCESS_FIRST + app;
+        if (!load_user_image(
+                &processes[index],
+                index + 1u,
+                app + 1u,
+                starts[app],
+                ends[app]))
+            return 0;
+        if (!app_mapping_isolated(&processes[index]) ||
+            (app && processes[index].surface_physical ==
+                processes[index - 1u].surface_physical))
+            return 0;
+        ++configured_processes;
+        if (!dispatch_process(index) ||
+            processes[index].state != ARGUS_PROCESS_READY ||
+            !processes[index].present_valid)
+            return 0;
+    }
     process_self_test_passed = 1;
     scheduler_cursor = 0;
     return 1;
@@ -460,32 +524,52 @@ int process_address_space_isolated(void) { return address_spaces_isolated; }
 int process_scheduler_online(void) {
     return scheduler_ready && process_self_test_passed;
 }
-int process_snake_online(void) { return snake_online && snake_frame_valid; }
-
-void process_snake_set_active(int active) {
-    snake_active = active != 0 && snake_online;
+static process_t *find_app(uint32_t app_id) {
+    if (!app_id) return 0;
+    for (uint32_t index = APP_PROCESS_FIRST; index < configured_processes; ++index)
+        if (processes[index].app_id == app_id) return &processes[index];
+    return 0;
 }
 
-int process_snake_input(uint8_t key) {
-    if (!snake_online || !snake_active) return 0;
-    if (key >= 'A' && key <= 'Z') key = (uint8_t)(key - 'A' + 'a');
-    if (key != 'w' && key != 'a' && key != 's' && key != 'd' && key != 'r' &&
-        key != ARGUS_KEY_UP && key != ARGUS_KEY_DOWN &&
-        key != ARGUS_KEY_LEFT && key != ARGUS_KEY_RIGHT)
-        return 0;
+uint32_t process_app_count(void) { return APP_PROCESS_COUNT; }
+
+int process_app_online(uint32_t app_id) {
+    process_t *process = find_app(app_id);
+    return process && process->state == ARGUS_PROCESS_READY &&
+           process->present_valid;
+}
+
+void process_app_set_active(uint32_t app_id) {
+    for (uint32_t index = APP_PROCESS_FIRST; index < configured_processes; ++index)
+        processes[index].active = processes[index].app_id == app_id &&
+            processes[index].present_valid;
+}
+
+int process_app_input(uint32_t app_id, uint8_t key) {
+    process_t *process = find_app(app_id);
+    if (!process || !process->active || !process->present_valid || !key) return 0;
     uint8_t next = (uint8_t)(
-        (snake_input_head + 1u) & (SNAKE_INPUT_CAPACITY - 1u)
+        (process->input_head + 1u) & (APP_INPUT_CAPACITY - 1u)
     );
-    if (next == snake_input_tail) return 0;
-    snake_input[snake_input_head] = key;
-    snake_input_head = next;
+    if (next == process->input_tail) return 0;
+    process->input[process->input_head] = key;
+    process->input_head = next;
     return 1;
 }
 
-uint64_t process_snake_input_count(void) { return snake_inputs_delivered; }
+uint64_t process_app_input_count(uint32_t app_id) {
+    process_t *process = find_app(app_id);
+    return process ? process->inputs_delivered : 0u;
+}
 
-int process_snake_frame(argus_snake_frame_v1_t *frame) {
-    if (!frame || !snake_frame_valid) return 0;
-    *frame = snake_frame;
+int process_app_surface(
+    uint32_t app_id,
+    const uint8_t **pixels,
+    uint32_t *sequence
+) {
+    process_t *process = find_app(app_id);
+    if (!process || !process->present_valid || !pixels || !sequence) return 0;
+    *pixels = (const uint8_t *)(uintptr_t)process->surface_physical;
+    *sequence = process->present_sequence;
     return 1;
 }

@@ -51,6 +51,12 @@ jobs:
           test -s build/user_snake.o
           test -s build/user_snake.elf
           test -s build/user_snake.bin
+          test -s build/user_calculator.o
+          test -s build/user_calculator.elf
+          test -s build/user_calculator.bin
+          test -s build/user_notes.o
+          test -s build/user_notes.elf
+          test -s build/user_notes.bin
           test -s build/user_images.obj
           test -s build/pci.obj
           test -s build/ahci.obj
@@ -72,9 +78,11 @@ jobs:
           test -z "$fat32_symbols"
           nm -u build/rust_fat32.obj | grep -Fq "memcpy"
           nm -u build/rust_fat32.obj | grep -Fq "memset"
-          test -z "$(nm -u build/user_snake.o)"
-          test "$(wc -c < build/user_snake.bin)" -le 16384
-          readelf -h build/user_snake.elf | grep -Fq "0x8000001000"
+          for app in snake calculator notes; do
+            test -z "$(nm -u build/user_${app}.elf)"
+            test "$(wc -c < build/user_${app}.bin)" -le 16384
+            readelf -h build/user_${app}.elf | grep -Fq "0x8000001000"
+          done
           test -z "$(objdump -p build/BOOTX64.EFI | grep 'DLL Name')"
           file build/BOOTX64.EFI
           ls -l build/BOOTX64.EFI
@@ -124,7 +132,7 @@ jobs:
 
       - name: Validate smoke-test transcript
         run: |
-          grep -Fq "ArgusOS UEFI Study Monitor v0.16" qemu.log
+          grep -Fq "ArgusOS UEFI Study Monitor v0.17" qemu.log
           grep -Fq "ARGUS_KERNEL_ONLINE" qemu.log
           grep -Fq "BOOT_SERVICES_EXITED" qemu.log
           grep -Fq "PMM_SELF_TEST_PASS" qemu.log
@@ -156,34 +164,41 @@ jobs:
           grep -Fq "COOPERATIVE_SCHEDULER_PASS" qemu.log
           grep -Fq "USER_PROCESS_SELF_TEST_PASS" qemu.log
           grep -Fq "CPP_USERSPACE_ONLINE" qemu.log
+          grep -Fq "APP_SURFACE_ABI_V1_ONLINE" qemu.log
           grep -Fq "SNAKE_USER_APP_ONLINE" qemu.log
+          grep -Fq "CALCULATOR_USER_APP_ONLINE" qemu.log
+          grep -Fq "NOTES_USER_APP_ONLINE" qemu.log
           grep -Fq "DESKTOP_UI_ONLINE" qemu.log
           grep -Fq "SURFACE_SELF_TEST_PASS" qemu.log
           grep -Fq "COMPOSITOR_ONLINE" qemu.log
           grep -Fq "DESKTOP_APPS_ONLINE" qemu.log
           grep -Fq "SNAKE_APP_ONLINE" qemu.log
+          grep -Fq "CALCULATOR_APP_ONLINE" qemu.log
+          grep -Fq "NOTES_APP_ONLINE" qemu.log
+          grep -Fq "APPLICATION_LAUNCHER_ONLINE" qemu.log
           grep -Fq "DESKTOP_UI_REDRAWN" qemu.log
           grep -Fq "PS2_IRQ_ONLINE" qemu.log
           grep -Fq "PS2_MOUSE_IRQ_ONLINE" qemu.log
           grep -Fq "PS2_IRQ_INPUT_OK" qemu.log
-          grep -Fq "DESKTOP_DRAG_OK" qemu.log
-          grep -Fq "COMPOSITOR_DAMAGE_OK" qemu.log
           grep -Fq "COMPOSITOR_APPS_OK" qemu.log
           grep -Fq "APP_FOCUS_OK" qemu.log
-          grep -Fq "Active app: SYSTEM" qemu.log
+          grep -Fq "Active app: APPLICATIONS" qemu.log
+          grep -Fq "Active app: CALCULATOR" qemu.log
           grep -Fq "Active app: SNAKE" qemu.log
           grep -Fq "KERNEL_SHELL_READY" qemu.log
           grep -Fq "STATUS_OK" qemu.log
-          grep -Fq "Processes: 3" qemu.log
+          grep -Fq "Processes: 5" qemu.log
           grep -Fq "Completed: 2" qemu.log
-          grep -Fq "Syscalls: 16" qemu.log
-          grep -Fq "Context switches: 5" qemu.log
-          grep -Fq "C++ app: snake (ring 3)" qemu.log
+          grep -Fq "C++ apps: 3 (ring 3)" qemu.log
           grep -Fq "USERSPACE_STATUS_OK" qemu.log
+          grep -Fq "APP_SURFACE_ABI_OK" qemu.log
+          grep -Fq "CALCULATOR_INPUT_OK" qemu.log
+          grep -Fq "NOTES_INPUT_OK" qemu.log
+          grep -Fq "USER_APPS_OK" qemu.log
           grep -Fq "SNAKE_INPUT_OK" qemu.log
           grep -Fq "CPP_USER_APP_OK" qemu.log
           grep -Fq "SNAKE_FRAME_OK" qemu.log
-          grep -Fq "Surfaces: 4" qemu.log
+          grep -Fq "Surfaces: 7" qemu.log
           grep -Fq "MODULES_OK" qemu.log
           grep -Fq "ALLOC_OK" qemu.log
           grep -Fq "rust.ramfs (ABI 1)" qemu.log
@@ -204,12 +219,14 @@ jobs:
           grep -Fq "FAT32_CAT_OK" qemu.log
           grep -Fq "FAT32 error: not found" qemu.log
           test -s build/qemu-desktop.ppm
-          test -s build/qemu-desktop-dragged.ppm
           test -s build/qemu-desktop-apps.ppm
+          test -s build/qemu-desktop-calculator.ppm
+          test -s build/qemu-desktop-notes.ppm
           test -s build/qemu-desktop-snake.ppm
           file build/qemu-desktop.ppm
-          file build/qemu-desktop-dragged.ppm
           file build/qemu-desktop-apps.ppm
+          file build/qemu-desktop-calculator.ppm
+          file build/qemu-desktop-notes.ppm
           file build/qemu-desktop-snake.ppm
 
       - name: Upload desktop captures
@@ -218,8 +235,9 @@ jobs:
           name: argusos-desktop-framebuffer
           path: |
             build/qemu-desktop.ppm
-            build/qemu-desktop-dragged.ppm
             build/qemu-desktop-apps.ppm
+            build/qemu-desktop-calculator.ppm
+            build/qemu-desktop-notes.ppm
             build/qemu-desktop-snake.ppm
           if-no-files-found: error
 

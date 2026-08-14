@@ -82,7 +82,7 @@ void kernel_exception_panic(
 void kernel_main(const boot_info_t *boot_info) {
     kconsole_clear();
 
-    kprint("ArgusOS kernel v0.16\n");
+    kprint("ArgusOS kernel v0.17\n");
     kprint("ARGUS_KERNEL_ONLINE\n");
 
     if (!boot_info || boot_info->magic != ARGUS_BOOT_INFO_MAGIC ||
@@ -239,7 +239,10 @@ void kernel_main(const boot_info_t *boot_info) {
     kprint("COOPERATIVE_SCHEDULER_PASS\n");
     kprint("USER_PROCESS_SELF_TEST_PASS\n");
     kprint("CPP_USERSPACE_ONLINE\n");
+    kprint("APP_SURFACE_ABI_V1_ONLINE\n");
     kprint("SNAKE_USER_APP_ONLINE\n");
+    kprint("CALCULATOR_USER_APP_ONLINE\n");
+    kprint("NOTES_USER_APP_ONLINE\n");
 
     kprint("Argus-owned stack active. Entering native kernel shell.\n");
     kernel_shell_run(boot_info, &acpi, &paging);
