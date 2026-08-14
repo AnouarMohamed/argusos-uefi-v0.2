@@ -3,6 +3,7 @@
 
 #define PAGE_PRESENT  (1ULL << 0)
 #define PAGE_WRITABLE (1ULL << 1)
+#define PAGE_USER     (1ULL << 2)
 #define PAGE_PWT      (1ULL << 3)
 #define PAGE_PCD      (1ULL << 4)
 #define PAGE_LARGE    (1ULL << 7)
@@ -228,4 +229,156 @@ int paging_mark_mmio(
     }
     cpu_load_cr3(paging_info->root_table);
     return 1;
+}
+
+static uint64_t allocate_user_table(paging_user_space_t *user_space) {
+    if (!user_space ||
+        user_space->table_page_count >= ARGUS_USER_TABLE_MAX_PAGES)
+        return 0;
+    uint64_t address = pmm_alloc_page();
+    if (!address) return 0;
+    zero_page(address);
+    user_space->table_pages[user_space->table_page_count++] = address;
+    return address;
+}
+
+int paging_user_space_create(
+    const paging_info_t *kernel_space,
+    paging_user_space_t *user_space
+) {
+    if (!kernel_space || !kernel_space->root_table || !user_space) return 0;
+    *user_space = (paging_user_space_t){0};
+    user_space->nx_enabled = kernel_space->nx_enabled;
+
+    uint64_t root = allocate_user_table(user_space);
+    if (!root) return 0;
+    uint64_t *destination = (uint64_t *)(uintptr_t)root;
+    const uint64_t *source =
+        (const uint64_t *)(uintptr_t)kernel_space->root_table;
+    for (unsigned index = 0; index < 512u; ++index)
+        destination[index] = source[index];
+
+    unsigned user_index = 0;
+    for (unsigned index = 1u; index < 256u; ++index) {
+        if (!(destination[index] & PAGE_PRESENT)) {
+            user_index = index;
+            break;
+        }
+    }
+    if (!user_index) {
+        paging_user_space_destroy(user_space);
+        return 0;
+    }
+    user_space->root_table = root;
+    user_space->user_base = (uint64_t)user_index << 39;
+    return 1;
+}
+
+int paging_user_map_page(
+    paging_user_space_t *user_space,
+    uint64_t virtual_address,
+    uint64_t physical_address,
+    int writable,
+    int executable
+) {
+    if (!user_space || !user_space->root_table ||
+        (virtual_address & (ARGUS_PAGE_SIZE - 1u)) ||
+        (physical_address & (ARGUS_PAGE_SIZE - 1u)) ||
+        virtual_address < user_space->user_base ||
+        virtual_address >= user_space->user_base + (1ULL << 39))
+        return 0;
+
+    unsigned pml4_index = (unsigned)((virtual_address >> 39) & 0x1FFu);
+    unsigned pdpt_index = (unsigned)((virtual_address >> 30) & 0x1FFu);
+    unsigned pd_index = (unsigned)((virtual_address >> 21) & 0x1FFu);
+    unsigned pt_index = (unsigned)((virtual_address >> 12) & 0x1FFu);
+    uint64_t *pml4 = (uint64_t *)(uintptr_t)user_space->root_table;
+
+    if (!(pml4[pml4_index] & PAGE_PRESENT)) {
+        uint64_t table = allocate_user_table(user_space);
+        if (!table) return 0;
+        pml4[pml4_index] = table | PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER;
+    }
+    if (!(pml4[pml4_index] & PAGE_USER)) return 0;
+    uint64_t *pdpt = (uint64_t *)(uintptr_t)
+        (pml4[pml4_index] & PAGE_ADDRESS_MASK);
+
+    if (!(pdpt[pdpt_index] & PAGE_PRESENT)) {
+        uint64_t table = allocate_user_table(user_space);
+        if (!table) return 0;
+        pdpt[pdpt_index] = table | PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER;
+    }
+    if (!(pdpt[pdpt_index] & PAGE_USER) || (pdpt[pdpt_index] & PAGE_LARGE))
+        return 0;
+    uint64_t *pd = (uint64_t *)(uintptr_t)
+        (pdpt[pdpt_index] & PAGE_ADDRESS_MASK);
+
+    if (!(pd[pd_index] & PAGE_PRESENT)) {
+        uint64_t table = allocate_user_table(user_space);
+        if (!table) return 0;
+        pd[pd_index] = table | PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER;
+    }
+    if (!(pd[pd_index] & PAGE_USER) || (pd[pd_index] & PAGE_LARGE)) return 0;
+    uint64_t *pt = (uint64_t *)(uintptr_t)(pd[pd_index] & PAGE_ADDRESS_MASK);
+    if (pt[pt_index] & PAGE_PRESENT) return 0;
+
+    uint64_t flags = PAGE_PRESENT | PAGE_USER;
+    if (writable) flags |= PAGE_WRITABLE;
+    if (!executable && user_space->nx_enabled) flags |= PAGE_NX;
+    pt[pt_index] = physical_address | flags;
+    return 1;
+}
+
+int paging_user_translate(
+    const paging_user_space_t *user_space,
+    uint64_t virtual_address,
+    uint64_t *physical_address,
+    uint64_t *entry_flags
+) {
+    if (!user_space || !user_space->root_table) return 0;
+    unsigned pml4_index = (unsigned)((virtual_address >> 39) & 0x1FFu);
+    unsigned pdpt_index = (unsigned)((virtual_address >> 30) & 0x1FFu);
+    unsigned pd_index = (unsigned)((virtual_address >> 21) & 0x1FFu);
+    unsigned pt_index = (unsigned)((virtual_address >> 12) & 0x1FFu);
+    const uint64_t *pml4 =
+        (const uint64_t *)(uintptr_t)user_space->root_table;
+    if (!(pml4[pml4_index] & PAGE_PRESENT) ||
+        !(pml4[pml4_index] & PAGE_USER))
+        return 0;
+    const uint64_t *pdpt = (const uint64_t *)(uintptr_t)
+        (pml4[pml4_index] & PAGE_ADDRESS_MASK);
+    if (!(pdpt[pdpt_index] & PAGE_PRESENT) ||
+        !(pdpt[pdpt_index] & PAGE_USER) || (pdpt[pdpt_index] & PAGE_LARGE))
+        return 0;
+    const uint64_t *pd = (const uint64_t *)(uintptr_t)
+        (pdpt[pdpt_index] & PAGE_ADDRESS_MASK);
+    if (!(pd[pd_index] & PAGE_PRESENT) || !(pd[pd_index] & PAGE_USER) ||
+        (pd[pd_index] & PAGE_LARGE))
+        return 0;
+    const uint64_t *pt =
+        (const uint64_t *)(uintptr_t)(pd[pd_index] & PAGE_ADDRESS_MASK);
+    uint64_t entry = pt[pt_index];
+    if (!(entry & PAGE_PRESENT) || !(entry & PAGE_USER)) return 0;
+    if (physical_address)
+        *physical_address = (entry & PAGE_ADDRESS_MASK) |
+            (virtual_address & (ARGUS_PAGE_SIZE - 1u));
+    if (entry_flags) *entry_flags = entry & ~PAGE_ADDRESS_MASK;
+    return 1;
+}
+
+void paging_user_activate(const paging_user_space_t *user_space) {
+    if (user_space && user_space->root_table)
+        cpu_load_cr3(user_space->root_table);
+}
+
+void paging_kernel_activate(const paging_info_t *kernel_space) {
+    if (kernel_space && kernel_space->root_table)
+        cpu_load_cr3(kernel_space->root_table);
+}
+
+void paging_user_space_destroy(paging_user_space_t *user_space) {
+    if (!user_space) return;
+    for (uint32_t index = user_space->table_page_count; index > 0u; --index)
+        (void)pmm_free_page(user_space->table_pages[index - 1u]);
+    *user_space = (paging_user_space_t){0};
 }

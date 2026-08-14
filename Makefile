@@ -12,7 +12,7 @@ RUSTFLAGS = --target $(RUST_TARGET) --crate-type lib --emit=obj \
 OBJS = build/main.obj build/boot.obj build/kernel.obj build/acpi.obj build/ahci.obj build/apic.obj build/block.obj \
        build/arch.obj build/compositor.obj build/desktop.obj build/heap.obj build/input.obj build/kconsole.obj \
        build/kernel_shell.obj build/memory.obj build/module.obj build/paging.obj build/fat32.obj \
-       build/pci.obj build/pmm.obj build/ps2.obj build/serial.obj \
+       build/pci.obj build/pmm.obj build/process.obj build/ps2.obj build/serial.obj \
        build/ramfs.obj build/surface.obj build/rust_probe.obj build/rust_ramfs.obj build/rust_fat32.obj \
        build/uefi_memory.obj build/cpu.obj build/gop.obj build/console.obj build/font5x7.obj
 
@@ -27,7 +27,7 @@ build/main.obj: src/main.c src/efi.h src/boot.h src/console.h src/gop.h src/seri
 build/boot.obj: src/boot.c src/boot.h src/boot_info.h src/efi.h src/console.h src/gop.h src/kernel.h src/serial.h src/uefi_memory.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-build/kernel.obj: src/kernel.c src/kernel.h src/acpi.h src/ahci.h src/apic.h src/arch.h src/block.h src/boot_info.h src/fat32.h src/fat32_abi.h src/heap.h src/input.h src/kconsole.h src/kernel_shell.h src/module.h src/module_abi.h src/paging.h src/pci.h src/pmm.h src/ramfs.h src/ramfs_abi.h | build
+build/kernel.obj: src/kernel.c src/kernel.h src/acpi.h src/ahci.h src/apic.h src/arch.h src/block.h src/boot_info.h src/fat32.h src/fat32_abi.h src/heap.h src/input.h src/kconsole.h src/kernel_shell.h src/module.h src/module_abi.h src/paging.h src/pci.h src/pmm.h src/process.h src/ramfs.h src/ramfs_abi.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/acpi.obj: src/acpi.c src/acpi.h src/boot_info.h | build
@@ -60,7 +60,7 @@ build/input.obj: src/input.c src/input.h src/acpi.h src/ps2.h src/serial.h | bui
 build/kconsole.obj: src/kconsole.c src/kconsole.h src/console.h src/serial.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-build/kernel_shell.obj: src/kernel_shell.c src/kernel_shell.h src/acpi.h src/ahci.h src/apic.h src/block.h src/boot_info.h src/desktop.h src/fat32.h src/fat32_abi.h src/heap.h src/input.h src/kconsole.h src/module.h src/module_abi.h src/paging.h src/pci.h src/pmm.h src/ramfs.h src/ramfs_abi.h src/serial.h | build
+build/kernel_shell.obj: src/kernel_shell.c src/kernel_shell.h src/acpi.h src/ahci.h src/apic.h src/block.h src/boot_info.h src/desktop.h src/fat32.h src/fat32_abi.h src/heap.h src/input.h src/kconsole.h src/module.h src/module_abi.h src/paging.h src/pci.h src/pmm.h src/process.h src/ramfs.h src/ramfs_abi.h src/serial.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/memory.obj: src/memory.c | build
@@ -94,6 +94,9 @@ build/pci.obj: src/pci.c src/pci.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/pmm.obj: src/pmm.c src/pmm.h src/boot_info.h src/uefi_memory.h src/efi.h | build
+	$(CLANG) $(CFLAGS) -c $< -o $@
+
+build/process.obj: src/process.c src/process.h src/arch.h src/paging.h src/pmm.h src/serial.h src/user_abi.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/ps2.obj: src/ps2.c src/ps2.h src/acpi.h src/apic.h src/arch.h | build

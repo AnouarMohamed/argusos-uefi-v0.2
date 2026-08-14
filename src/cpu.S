@@ -189,7 +189,7 @@ arch_load_idt:
 
 .globl arch_load_task_register
 arch_load_task_register:
-    mov ax, 0x18
+    mov ax, 0x28
     ltr ax
     ret
 
@@ -203,6 +203,195 @@ arch_read_task_register:
 arch_enable_interrupts:
     sti
     ret
+
+.globl arch_resume_user
+arch_resume_user:
+    # RCX = arch_user_context_t pointer. Preserve the Microsoft x64 nonvolatile
+    # state so a yield or exit can return to the C scheduler like a normal call.
+    pushfq
+    push rbx
+    push rbp
+    push rdi
+    push rsi
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 160
+    movdqu xmmword ptr [rsp + 0], xmm6
+    movdqu xmmword ptr [rsp + 16], xmm7
+    movdqu xmmword ptr [rsp + 32], xmm8
+    movdqu xmmword ptr [rsp + 48], xmm9
+    movdqu xmmword ptr [rsp + 64], xmm10
+    movdqu xmmword ptr [rsp + 80], xmm11
+    movdqu xmmword ptr [rsp + 96], xmm12
+    movdqu xmmword ptr [rsp + 112], xmm13
+    movdqu xmmword ptr [rsp + 128], xmm14
+    movdqu xmmword ptr [rsp + 144], xmm15
+    mov qword ptr [rip + arch_user_return_rsp], rsp
+
+    mov r10, rcx
+    xor eax, eax
+    mov ds, ax
+    mov es, ax
+    push 0x1b
+    push qword ptr [r10 + 120]
+    push qword ptr [r10 + 112]
+    push 0x23
+    push qword ptr [r10 + 104]
+    mov r15, qword ptr [r10 + 0]
+    mov r14, qword ptr [r10 + 8]
+    mov r13, qword ptr [r10 + 16]
+    mov r12, qword ptr [r10 + 24]
+    mov r9, qword ptr [r10 + 40]
+    mov r8, qword ptr [r10 + 48]
+    mov rdi, qword ptr [r10 + 56]
+    mov rsi, qword ptr [r10 + 64]
+    mov rbp, qword ptr [r10 + 72]
+    mov rdx, qword ptr [r10 + 80]
+    mov rbx, qword ptr [r10 + 88]
+    mov rax, qword ptr [r10 + 96]
+    mov r10, qword ptr [r10 + 32]
+    iretq
+
+.globl syscall_entry
+syscall_entry:
+    # SYSCALL leaves the user return RIP in RCX, flags in R11, and does not
+    # switch stacks. Capture a single-CPU user context before touching either.
+    mov qword ptr [rip + syscall_context + 0], r15
+    mov qword ptr [rip + syscall_context + 8], r14
+    mov qword ptr [rip + syscall_context + 16], r13
+    mov qword ptr [rip + syscall_context + 24], r12
+    mov qword ptr [rip + syscall_context + 32], r10
+    mov qword ptr [rip + syscall_context + 40], r9
+    mov qword ptr [rip + syscall_context + 48], r8
+    mov qword ptr [rip + syscall_context + 56], rdi
+    mov qword ptr [rip + syscall_context + 64], rsi
+    mov qword ptr [rip + syscall_context + 72], rbp
+    mov qword ptr [rip + syscall_context + 80], rdx
+    mov qword ptr [rip + syscall_context + 88], rbx
+    mov qword ptr [rip + syscall_context + 96], rax
+    mov qword ptr [rip + syscall_context + 104], rcx
+    mov qword ptr [rip + syscall_context + 112], r11
+    mov qword ptr [rip + syscall_context + 120], rsp
+
+    mov ax, 0x10
+    mov ds, ax
+    mov es, ax
+    mov rsp, qword ptr [rip + syscall_kernel_rsp]
+    and rsp, -16
+    sub rsp, 32
+    lea rcx, [rip + syscall_context]
+    call syscall_dispatch
+    mov qword ptr [rip + arch_user_return_action], rax
+    test rax, rax
+    jne .Luser_return_to_kernel
+
+    xor eax, eax
+    mov ds, ax
+    mov es, ax
+    lea r11, [rip + syscall_context]
+    mov r15, qword ptr [r11 + 0]
+    mov r14, qword ptr [r11 + 8]
+    mov r13, qword ptr [r11 + 16]
+    mov r12, qword ptr [r11 + 24]
+    mov r10, qword ptr [r11 + 32]
+    mov r9, qword ptr [r11 + 40]
+    mov r8, qword ptr [r11 + 48]
+    mov rdi, qword ptr [r11 + 56]
+    mov rsi, qword ptr [r11 + 64]
+    mov rbp, qword ptr [r11 + 72]
+    mov rdx, qword ptr [r11 + 80]
+    mov rbx, qword ptr [r11 + 88]
+    mov rcx, qword ptr [r11 + 104]
+    mov rsp, qword ptr [r11 + 120]
+    mov rax, qword ptr [r11 + 96]
+    mov r11, qword ptr [r11 + 112]
+    sysretq
+
+.Luser_return_to_kernel:
+    mov rsp, qword ptr [rip + arch_user_return_rsp]
+    movdqu xmm6, xmmword ptr [rsp + 0]
+    movdqu xmm7, xmmword ptr [rsp + 16]
+    movdqu xmm8, xmmword ptr [rsp + 32]
+    movdqu xmm9, xmmword ptr [rsp + 48]
+    movdqu xmm10, xmmword ptr [rsp + 64]
+    movdqu xmm11, xmmword ptr [rsp + 80]
+    movdqu xmm12, xmmword ptr [rsp + 96]
+    movdqu xmm13, xmmword ptr [rsp + 112]
+    movdqu xmm14, xmmword ptr [rsp + 128]
+    movdqu xmm15, xmmword ptr [rsp + 144]
+    add rsp, 160
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rsi
+    pop rdi
+    pop rbp
+    pop rbx
+    mov ax, 0x10
+    mov ds, ax
+    mov es, ax
+    popfq
+    mov rax, qword ptr [rip + arch_user_return_action]
+    ret
+
+.p2align 4
+.globl user_probe_start
+user_probe_start:
+    mov r12, rdi
+    mov qword ptr [rsp - 8], rdi
+    mov eax, 2
+    syscall
+    cmp rax, r12
+    jne .Luser_probe_fail
+
+    mov eax, 1
+    lea rdi, [rip + .Luser_started]
+    mov esi, 21
+    syscall
+
+    mov eax, 3
+    syscall
+    cmp qword ptr [rsp - 8], r12
+    jne .Luser_probe_fail
+
+    mov eax, 1
+    lea rdi, [rip + .Luser_resumed]
+    mov esi, 21
+    syscall
+
+    mov eax, 4
+    xor edi, edi
+    syscall
+
+.Luser_probe_fail:
+    mov eax, 4
+    mov edi, 1
+    syscall
+    ud2
+
+.Luser_started:
+    .ascii "USER_PROCESS_STARTED\n"
+.Luser_resumed:
+    .ascii "USER_PROCESS_RESUMED\n"
+.globl user_probe_end
+user_probe_end:
+
+.bss
+.p2align 4
+.globl syscall_kernel_rsp
+syscall_kernel_rsp:
+    .quad 0
+arch_user_return_rsp:
+    .quad 0
+arch_user_return_action:
+    .quad 0
+syscall_context:
+    .zero 128
+
+.text
 
 .macro ISR_NO_ERROR vector
 .globl isr_\vector

@@ -31,9 +31,18 @@ _Static_assert(sizeof(task_state_segment_t) == 104u,
                "x86-64 TSS layout must remain architectural");
 
 #define DOUBLE_FAULT_STACK_BYTES 16384u
-#define TSS_SELECTOR 0x18u
+#define USER_DATA_SELECTOR 0x18u
+#define USER_CODE_SELECTOR 0x20u
+#define TSS_SELECTOR 0x28u
+#define IA32_EFER_MSR 0xC0000080u
+#define IA32_STAR_MSR 0xC0000081u
+#define IA32_LSTAR_MSR 0xC0000082u
+#define IA32_FMASK_MSR 0xC0000084u
+#define EFER_SYSCALL_ENABLE (1ULL << 0)
+#define RFLAGS_INTERRUPT_ENABLE (1ULL << 9)
+#define RFLAGS_DIRECTION (1ULL << 10)
 
-static uint64_t gdt[5];
+static uint64_t gdt[7];
 static idt_gate_t idt[256];
 static interrupt_handler_t interrupt_handlers[256];
 static task_state_segment_t tss;
@@ -46,7 +55,14 @@ extern void arch_load_task_register(void);
 extern uint16_t arch_read_task_register(void);
 extern void cpu_out8(uint16_t port, uint8_t value);
 extern uint64_t cpu_read_cr2(void);
+extern uint64_t cpu_rdmsr(uint32_t msr);
+extern void cpu_wrmsr(uint32_t msr, uint64_t value);
+extern void syscall_entry(void);
+extern uint64_t syscall_kernel_rsp;
 extern void *isr_stub_table[];
+
+_Static_assert(sizeof(arch_user_context_t) == 128u,
+               "user context layout must match syscall assembly");
 
 static void set_idt_gate(unsigned vector, void *handler, uint8_t ist) {
     uint64_t address = (uint64_t)(uintptr_t)handler;
@@ -67,18 +83,20 @@ static void initialize_tss(void) {
 
     uint64_t base = (uint64_t)(uintptr_t)&tss;
     uint64_t limit = sizeof(tss) - 1u;
-    gdt[3] = (limit & 0xFFFFu) |
+    gdt[5] = (limit & 0xFFFFu) |
              ((base & 0xFFFFFFu) << 16) |
              (0x89ULL << 40) |
              (((limit >> 16) & 0xFu) << 48) |
              (((base >> 24) & 0xFFu) << 56);
-    gdt[4] = base >> 32;
+    gdt[6] = base >> 32;
 }
 
 int arch_init(void) {
     gdt[0] = 0;
     gdt[1] = 0x00AF9A000000FFFFULL;
     gdt[2] = 0x00CF92000000FFFFULL;
+    gdt[3] = 0x00CFF2000000FFFFULL;
+    gdt[4] = 0x00AFFA000000FFFFULL;
     initialize_tss();
     descriptor_table_pointer_t gdtr = {
         (uint16_t)(sizeof(gdt) - 1u),
@@ -114,6 +132,25 @@ int arch_init(void) {
     cpu_out8(0x21u, 0xFFu);
     cpu_out8(0xA1u, 0xFFu);
     return arch_read_task_register() == TSS_SELECTOR;
+}
+
+int arch_syscall_init(uint64_t kernel_stack_top) {
+    if (!kernel_stack_top || (kernel_stack_top & 0xFu)) return 0;
+    tss.rsp[0] = kernel_stack_top;
+    syscall_kernel_rsp = kernel_stack_top;
+    uint64_t efer = cpu_rdmsr(IA32_EFER_MSR);
+    cpu_wrmsr(IA32_EFER_MSR, efer | EFER_SYSCALL_ENABLE);
+    cpu_wrmsr(
+        IA32_STAR_MSR,
+        ((uint64_t)(USER_DATA_SELECTOR - 8u) << 48) | (0x08ULL << 32)
+    );
+    cpu_wrmsr(IA32_LSTAR_MSR, (uint64_t)(uintptr_t)syscall_entry);
+    cpu_wrmsr(
+        IA32_FMASK_MSR,
+        RFLAGS_INTERRUPT_ENABLE | RFLAGS_DIRECTION
+    );
+    return (cpu_rdmsr(IA32_EFER_MSR) & EFER_SYSCALL_ENABLE) != 0 &&
+           USER_CODE_SELECTOR == USER_DATA_SELECTOR + 8u;
 }
 
 void arch_trigger_double_fault(uint64_t unmapped_address) {

@@ -13,6 +13,7 @@
 #include "paging.h"
 #include "pci.h"
 #include "pmm.h"
+#include "process.h"
 #include "ramfs.h"
 
 extern void cpu_pause(void);
@@ -81,7 +82,7 @@ void kernel_exception_panic(
 void kernel_main(const boot_info_t *boot_info) {
     kconsole_clear();
 
-    kprint("ArgusOS kernel v0.14\n");
+    kprint("ArgusOS kernel v0.15\n");
     kprint("ARGUS_KERNEL_ONLINE\n");
 
     if (!boot_info || boot_info->magic != ARGUS_BOOT_INFO_MAGIC ||
@@ -219,6 +220,7 @@ void kernel_main(const boot_info_t *boot_info) {
         kprint("DOUBLE_FAULT_SELF_TEST_BEGIN\n");
         arch_trigger_double_fault(paging.stack_guard_page);
     }
+    if (!process_init(&paging)) panic("user process initialization failed");
     if (!apic_init(&acpi)) panic("local APIC initialization failed");
     kprint("LOCAL_APIC_ONLINE\n");
 
@@ -229,6 +231,13 @@ void kernel_main(const boot_info_t *boot_info) {
         cpu_pause();
     if (!apic_timer_ticks()) panic("local APIC timer did not fire");
     kprint("APIC_TIMER_TICK\n");
+
+    if (!process_run_self_test()) panic("user process self-test failed");
+    kprint("USER_RING3_ONLINE\n");
+    kprint("SYSCALL_SYSRET_ONLINE\n");
+    kprint("USER_ADDRESS_SPACE_ISOLATION_PASS\n");
+    kprint("COOPERATIVE_SCHEDULER_PASS\n");
+    kprint("USER_PROCESS_SELF_TEST_PASS\n");
 
     kprint("Argus-owned stack active. Entering native kernel shell.\n");
     kernel_shell_run(boot_info, &acpi, &paging);

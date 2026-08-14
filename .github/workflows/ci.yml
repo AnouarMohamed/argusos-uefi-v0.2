@@ -47,6 +47,7 @@ jobs:
           test -s build/desktop.obj
           test -s build/compositor.obj
           test -s build/surface.obj
+          test -s build/process.obj
           test -s build/pci.obj
           test -s build/ahci.obj
           test -s build/rust_probe.obj
@@ -116,7 +117,7 @@ jobs:
 
       - name: Validate smoke-test transcript
         run: |
-          grep -Fq "ArgusOS UEFI Study Monitor v0.14" qemu.log
+          grep -Fq "ArgusOS UEFI Study Monitor v0.15" qemu.log
           grep -Fq "ARGUS_KERNEL_ONLINE" qemu.log
           grep -Fq "BOOT_SERVICES_EXITED" qemu.log
           grep -Fq "PMM_SELF_TEST_PASS" qemu.log
@@ -140,6 +141,13 @@ jobs:
           grep -Fq "GDT_IDT_ONLINE" qemu.log
           grep -Fq "DOUBLE_FAULT_IST_ONLINE" qemu.log
           grep -Fq "APIC_TIMER_TICK" qemu.log
+          grep -Fq "USER_PROCESS_STARTED" qemu.log
+          grep -Fq "USER_PROCESS_RESUMED" qemu.log
+          grep -Fq "USER_RING3_ONLINE" qemu.log
+          grep -Fq "SYSCALL_SYSRET_ONLINE" qemu.log
+          grep -Fq "USER_ADDRESS_SPACE_ISOLATION_PASS" qemu.log
+          grep -Fq "COOPERATIVE_SCHEDULER_PASS" qemu.log
+          grep -Fq "USER_PROCESS_SELF_TEST_PASS" qemu.log
           grep -Fq "DESKTOP_UI_ONLINE" qemu.log
           grep -Fq "SURFACE_SELF_TEST_PASS" qemu.log
           grep -Fq "COMPOSITOR_ONLINE" qemu.log
@@ -155,6 +163,11 @@ jobs:
           grep -Fq "Active app: SYSTEM" qemu.log
           grep -Fq "KERNEL_SHELL_READY" qemu.log
           grep -Fq "STATUS_OK" qemu.log
+          grep -Fq "Processes: 2" qemu.log
+          grep -Fq "Completed: 2" qemu.log
+          grep -Fq "Syscalls: 10" qemu.log
+          grep -Fq "Context switches: 4" qemu.log
+          grep -Fq "USERSPACE_STATUS_OK" qemu.log
           grep -Fq "MODULES_OK" qemu.log
           grep -Fq "ALLOC_OK" qemu.log
           grep -Fq "rust.ramfs (ABI 1)" qemu.log

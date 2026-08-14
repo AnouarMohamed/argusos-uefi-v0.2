@@ -1,4 +1,4 @@
-# ArgusOS UEFI Study Kernel v0.14
+# ArgusOS UEFI Study Kernel v0.15
 
 A deliberately small x86-64 UEFI bare-metal study kernel.
 
@@ -56,6 +56,12 @@ kernel with framebuffer and direct COM1 output.
   into PMM-owned memory after firmware exit.
 - A bounded read-only Rust FAT32 parser validates BPB geometry, enumerates root
   8.3 entries, and follows FAT chains through the block-device boundary.
+- Two embedded user images execute at CPU privilege level 3 with private CR3
+  roots, separate code/stack pages, an unmapped stack guard, and W^X mappings.
+- A versioned syscall ABI provides bounded serial writes, PID lookup, cooperative
+  yield, and exit through x86-64 `SYSCALL`/`SYSRET` transitions.
+- A minimal round-robin scheduler preserves user register state across yields and
+  proves that both isolated probe processes resume and exit successfully.
 
 ## What is *not* implemented yet?
 
@@ -65,9 +71,11 @@ machines whose firmware does not expose a PS/2-compatible keyboard will need an
 xHCI/USB HID driver. Storage currently supports the first 512-byte-sector LBA48
 SATA device on the first discovered AHCI controller, using polling and a one-sector
 DMA bounce buffer. There is no partition-table traversal, AHCI interrupt/NCQ path,
-hotplug, storage write path, scheduler, userspace, networking, USB HID stack,
-user-space display server, or SMP startup. The v0.14 compositor and utility apps
-remain kernel-hosted prototypes, not process-isolated applications.
+hotplug, storage write path, preemptive scheduler, ELF loader, dynamic process
+creation, user-mode fault recovery, IPC, networking, USB HID stack, user-space
+display server, or SMP startup. The v0.14 compositor and utility apps remain
+kernel-hosted prototypes, not process-isolated applications. The v0.15 user
+processes are boot-time flat-image probes rather than a general application model.
 Runtime Services memory is preserved, but the kernel does not call Runtime
 Services after the handoff.
 
@@ -89,8 +97,9 @@ build/BOOTX64.EFI
 
 CI performs the same freestanding build with warnings treated as errors, creates
 a FAT32 boot image, boots it with QEMU/OVMF, enters `boot`, and requires explicit
-post-firmware, allocator, paging, guard-page, TSS/IST, APIC-timer, and
-kernel-shell markers. It drives COM1 commands, injects a QEMU hardware key
+post-firmware, allocator, paging, guard-page, TSS/IST, APIC-timer, ring-3,
+syscall, address-space, scheduler, and kernel-shell markers. It drives COM1 commands,
+injects a QEMU hardware key
 sequence through the PS/2 IRQ path, verifies allocator invariants, and performs a
 RAMFS write/read/remove/not-found round trip. Separate negative boots require
 breakpoint, stack-guard page-fault, and double-fault diagnostics. The same boot
@@ -176,6 +185,7 @@ heaptest
 memtest
 alloc 4096
 modules
+processes
 fs
 ls
 cat /README
@@ -211,6 +221,9 @@ src/kernel.c    post-firmware kernel entry and subsystem initialization
 src/pmm.c       tracked physical-page and contiguous-run allocator
 src/heap.c      aligned first-fit kernel heap with split/coalesce support
 src/paging.c    kernel-owned identity page tables and memory attributes
+src/process.c   isolated user images, syscall validation, and cooperative scheduler
+src/process.h   process state and kernel-facing diagnostics
+src/user_abi.h  versioned syscall numbers shared with freestanding user programs
 src/acpi.c      validated RSDP/XSDT/MADT discovery and IRQ overrides
 src/arch.c      GDT, IDT, TSS/IST, exception dispatch, and PIC masking
 src/apic.c      local APIC timer and I/O-APIC interrupt routing
@@ -252,6 +265,7 @@ docs/ahci-storage-v0.11.md PCI/AHCI ownership, DMA, limits, and recovery model
 docs/desktop-ui-v0.12.md first desktop slice, renderer boundary, and limitations
 docs/pointer-ui-v0.13.md PS/2 mouse, cursor, hit testing, and dragging boundary
 docs/surface-compositor-v0.14.md retained surfaces, compositor, and app boundary
+docs/userspace-v0.15.md ring-3, syscall, address-space, and scheduler boundary
 PRODUCT.md      product intent, personality, anti-references, and principles
 DESIGN.md       normative ArgusOS desktop tokens and component rules
 ```
@@ -268,8 +282,9 @@ DESIGN.md       normative ArgusOS desktop tokens and component rules
   It currently owns a stateless checksum and the fixed-capacity RAMFS path/file
   state machine plus the read-only FAT32 parser used by the Files app, with no
   allocator or hardware access.
-- C++ is reserved for the first user-space display server and application toolkit,
-  targeted for v0.16 after the v0.15 ring-3, syscall, scheduling, and loader work.
+- C++ is reserved for freestanding user applications and the future display-server
+  toolkit, starting in v0.16 now that v0.15 provides a ring-3 and syscall boundary.
+  The first C++ image will be statically embedded until executable loading exists.
 - Boot, page tables, allocators, interrupt control, and device ownership remain
   in C and x86-64 assembly until a later ABI explicitly and safely exposes them.
 - Do not add languages merely by subsystem count: every language adds a
@@ -399,16 +414,28 @@ Recommended next order:
 4. NVMe read-only block backend
 5. a write/cache layer only after power-loss and corruption semantics are designed
 
-### Stage J — processes, targeted for v0.15
-Implement:
+### Stage J — first process boundary, completed in v0.15
 
-- ring 3
-- syscall/sysret
-- context switching
-- scheduler
-- per-process address spaces
+Implemented:
 
-At that point ArgusOS is becoming a conventional kernel rather than a firmware monitor.
+- ring-3 entry through an architectural IRET frame
+- `SYSCALL`/`SYSRET` with a dedicated kernel syscall stack
+- complete integer and Microsoft x64 nonvolatile context preservation
+- private page-table roots and distinct physical code/stack pages
+- read-only executable code, writable NX stacks, and unmapped stack guards
+- a bounded syscall ABI for write, getpid, yield, and exit
+- cooperative round-robin scheduling of two independent user probes
+- boot and shell tests for isolation, scheduling, and successful completion
+
+Still implement:
+
+- persistent processes instead of boot-time validation probes
+- preemption and timer-driven scheduling
+- ELF loading and dynamic process creation
+- user exception recovery, termination, IPC, and shared display surfaces
+
+This is the first conventional kernel/userspace boundary, but not yet a general
+application runtime.
 
 ### Stage K — continued in v0.14: retained surfaces and utility apps
 
@@ -434,18 +461,20 @@ Still implement:
 - bitmap/font asset loading through the read-only filesystem
 - a minimal user-space display-server protocol
 
-The v0.14 desktop proves the surface contract and interaction model before process
-isolation exists. The apps are intentionally small and honest, but still execute
-inside the kernel.
+The v0.14 desktop proves the surface contract and interaction model. Its apps are
+intentionally small and honest, but still execute inside the kernel; v0.15 does
+not silently relabel them as user applications.
 
 ### Stage L — C++ windowed UI, targeted for v0.16
 
-C++ enters the build here, after userspace, syscalls, scheduling, input, and file
-loading exist. It will turn the v0.14 compositor prototype into a user-space window
-server with a retained widget tree, layout, controls, and applications. Kernel
-drivers and ownership boundaries stay in C; format parsers and other bounded data
-components may remain Rust. The first durable milestone is a real client terminal
-window using the display protocol instead of kernel-owned framebuffer state.
+C++ enters the build here. The first v0.16 slice will compile a freestanding,
+exception-free C++ user image with explicit construction and no standard-library
+runtime assumptions, then launch it through the v0.15 process boundary. Moving the
+v0.14 compositor into a durable user-space window server still requires persistent
+scheduling, IPC/shared surfaces, and executable loading. Kernel drivers and
+ownership boundaries stay in C; bounded data components may remain Rust. The first
+durable UI milestone remains a real client terminal window using a display protocol
+instead of kernel-owned framebuffer state.
 
 ## Exercises
 

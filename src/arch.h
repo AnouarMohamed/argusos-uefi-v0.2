@@ -28,7 +28,32 @@ typedef struct {
 
 typedef void (*interrupt_handler_t)(interrupt_frame_t *frame);
 
+typedef struct {
+    uint64_t r15;
+    uint64_t r14;
+    uint64_t r13;
+    uint64_t r12;
+    uint64_t r10;
+    uint64_t r9;
+    uint64_t r8;
+    uint64_t rdi;
+    uint64_t rsi;
+    uint64_t rbp;
+    uint64_t rdx;
+    uint64_t rbx;
+    uint64_t rax;
+    uint64_t rip;
+    uint64_t rflags;
+    uint64_t rsp;
+} arch_user_context_t;
+
+#define ARCH_USER_ACTION_RETURN 0u
+#define ARCH_USER_ACTION_YIELD 1u
+#define ARCH_USER_ACTION_EXIT 2u
+
 int arch_init(void);
+int arch_syscall_init(uint64_t kernel_stack_top);
+uint64_t arch_resume_user(const arch_user_context_t *context);
 void arch_enable_interrupts(void);
 void arch_trigger_double_fault(uint64_t unmapped_address) __attribute__((noreturn));
 int arch_on_double_fault_ist(void);

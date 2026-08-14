@@ -1,0 +1,11 @@
+#ifndef ARGUS_USER_ABI_H
+#define ARGUS_USER_ABI_H
+
+#define ARGUS_SYSCALL_WRITE 1u
+#define ARGUS_SYSCALL_GETPID 2u
+#define ARGUS_SYSCALL_YIELD 3u
+#define ARGUS_SYSCALL_EXIT 4u
+
+#define ARGUS_USER_ABI_VERSION 1u
+
+#endif

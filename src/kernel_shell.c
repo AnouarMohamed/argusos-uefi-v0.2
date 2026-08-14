@@ -10,6 +10,7 @@
 #include "module.h"
 #include "pci.h"
 #include "pmm.h"
+#include "process.h"
 #include "ramfs.h"
 #include "serial.h"
 
@@ -54,6 +55,7 @@ static void print_help(void) {
     kconsole_write("  memtest      rerun PMM + heap hardening tests\n");
     kconsole_write("  alloc N      allocate, verify, and free N bytes\n");
     kconsole_write("  modules      validated kernel modules\n");
+    kconsole_write("  processes    user process and scheduler state\n");
     kconsole_write("  fs           Rust RAMFS statistics\n");
     kconsole_write("  ls           list RAMFS files\n");
     kconsole_write("  cat PATH     print a RAMFS file\n");
@@ -83,7 +85,7 @@ static void print_status(
     const acpi_info_t *acpi,
     const paging_info_t *paging
 ) {
-    kconsole_write("\nArgusOS kernel v0.14\n");
+    kconsole_write("\nArgusOS kernel v0.15\n");
     kconsole_write("Boot Services: exited\nCPUs: ");
     kconsole_write_dec(acpi->enabled_cpu_count);
     kconsole_write("\nCR3: ");
@@ -411,6 +413,23 @@ static void execute_command(
             ? "ALLOCATOR_HARDENING_PASS\n" : "ALLOCATOR_HARDENING_FAIL\n");
     else if (starts_with(line, "alloc ")) allocation_probe(line + 6);
     else if (strings_equal(line, "modules")) print_modules();
+    else if (strings_equal(line, "processes")) {
+        kconsole_write("Processes: ");
+        kconsole_write_dec(process_count());
+        kconsole_write("\nCompleted: ");
+        kconsole_write_dec(process_completed_count());
+        kconsole_write("\nSyscalls: ");
+        kconsole_write_dec(process_syscall_count());
+        kconsole_write("\nYields: ");
+        kconsole_write_dec(process_yield_count());
+        kconsole_write("\nContext switches: ");
+        kconsole_write_dec(process_context_switch_count());
+        kconsole_write("\nAddress spaces: ");
+        kconsole_write(process_address_space_isolated()
+            ? "isolated" : "invalid");
+        kconsole_write(process_scheduler_online()
+            ? "\nUSERSPACE_STATUS_OK\n" : "\nUSERSPACE_STATUS_FAIL\n");
+    }
     else if (strings_equal(line, "fs")) print_ramfs_status();
     else if (strings_equal(line, "ls")) list_ramfs();
     else if (starts_with(line, "cat ")) cat_ramfs(line + 4);
