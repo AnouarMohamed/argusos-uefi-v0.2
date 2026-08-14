@@ -55,7 +55,7 @@ build/block.obj: src/block.c src/block.h | build
 build/compositor.obj: src/compositor.c src/compositor.h src/gop.h src/surface.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-build/desktop.obj: src/desktop.c src/desktop.h src/anonymity.h src/apic.h src/app_abi.h src/compositor.h src/console.h src/fat32.h src/gop.h src/heap.h src/input.h src/net.h src/pmm.h src/process.h src/ramfs.h src/surface.h | build
+build/desktop.obj: src/desktop.c src/desktop.h src/anonymity.h src/apic.h src/app_abi.h src/compositor.h src/console.h src/fat32.h src/gop.h src/heap.h src/input.h src/input_keys.h src/net.h src/pmm.h src/process.h src/ramfs.h src/surface.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/arch.obj: src/arch.c src/arch.h src/apic.h src/kernel.h | build
@@ -198,6 +198,9 @@ usb-tree: build/BOOTX64.EFI
 test-image: build/BOOTX64.EFI
 	$(PYTHON) tools/argus.py image --efi $< --output build/argus-test.img
 
+run: test-image
+	$(PYTHON) tools/argus.py run --image build/argus-test.img
+
 smoke: build/BOOTX64.EFI
 	$(PYTHON) tools/argus.py smoke --efi $<
 
@@ -212,4 +215,4 @@ host-check: | build
 clean:
 	rm -rf build EFI/BOOT/BOOTX64.EFI
 
-.PHONY: all clean fault-check host-check smoke test-image usb-tree
+.PHONY: all clean fault-check host-check run smoke test-image usb-tree

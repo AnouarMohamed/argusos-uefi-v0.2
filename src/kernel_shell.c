@@ -111,7 +111,7 @@ static void print_status(
     const acpi_info_t *acpi,
     const paging_info_t *paging
 ) {
-    kconsole_write("\nArgusOS kernel v0.21\n");
+    kconsole_write("\nArgusOS kernel v0.22\n");
     kconsole_write("Boot Services: exited\nCPUs: ");
     kconsole_write_dec(acpi->enabled_cpu_count);
     kconsole_write("\nCR3: ");
@@ -668,12 +668,17 @@ static void execute_command(
     else if (strings_equal(line, "apps")) {
         kconsole_write("Surfaces: ");
         kconsole_write_dec(desktop_surface_count());
+        kconsole_write("\nVisible windows: ");
+        kconsole_write_dec(desktop_visible_window_count());
         kconsole_write("\nActive app: ");
         kconsole_write(desktop_active_app());
+        kconsole_write("\nSingle-window mode: ");
+        kconsole_write(desktop_single_window_mode() ? "enforced" : "invalid");
         kconsole_write("\nCompositor frames: ");
         kconsole_write_dec(desktop_compositor_frames());
         kconsole_write(desktop_compositor_valid()
-            ? "\nCOMPOSITOR_APPS_OK\n" : "\nCOMPOSITOR_INVALID\n");
+            ? "\nSINGLE_WINDOW_DESKTOP_OK\nCOMPOSITOR_APPS_OK\n" :
+              "\nCOMPOSITOR_INVALID\n");
     }
     else if (starts_with(line, "focus "))
         kconsole_write(desktop_focus_app(line + 6)
@@ -686,6 +691,8 @@ static void execute_command(
         kconsole_write_dec(desktop_pointer_x());
         kconsole_putc(',');
         kconsole_write_dec(desktop_pointer_y());
+        kconsole_write(desktop_pointer_confined()
+            ? "\nPOINTER_CONFINEMENT_OK" : "\nPOINTER_CONFINEMENT_FAIL");
         kconsole_write("\nWindow position: ");
         kconsole_write_dec(desktop_window_x());
         kconsole_putc(',');
@@ -733,6 +740,13 @@ void kernel_shell_run(
         serial_write("SURFACE_SELF_TEST_PASS\n");
         serial_write("COMPOSITOR_ONLINE\n");
         serial_write("DESKTOP_APPS_ONLINE\n");
+        serial_write(desktop_visible_window_count() == 0u &&
+                     desktop_single_window_mode()
+            ? "CLEAN_DESKTOP_ONLINE\nSINGLE_WINDOW_DESKTOP_PASS\n" :
+              "DESKTOP_VISIBILITY_FAIL\n");
+        serial_write(desktop_pointer_confined()
+            ? "POINTER_CONFINEMENT_PASS\n" : "POINTER_CONFINEMENT_FAIL\n");
+        serial_write("WINDOW_CONTROLS_ONLINE\n");
         serial_write(process_app_online(ARGUS_APP_ID_SNAKE)
             ? "SNAKE_APP_ONLINE\n" : "SNAKE_APP_UNAVAILABLE\n");
         serial_write(process_app_online(ARGUS_APP_ID_CALCULATOR)

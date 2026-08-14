@@ -25,6 +25,7 @@
 #define APP_SNAKE 4u
 #define APP_CALCULATOR 5u
 #define APP_NOTES 6u
+#define APP_NONE UINT32_MAX
 #define LAUNCHER_ENTRY_COUNT 6u
 
 typedef struct {
@@ -78,8 +79,10 @@ static uint32_t scale;
 static uint32_t panel_height;
 static uint32_t title_height;
 static uint32_t active_app;
-static uint32_t task_x[APP_COUNT];
-static uint32_t task_width[APP_COUNT];
+static uint32_t launcher_task_x;
+static uint32_t launcher_task_width;
+static uint32_t active_task_x;
+static uint32_t active_task_width;
 static int desktop_online;
 static int dragging;
 static uint32_t dragged_app;
@@ -165,6 +168,37 @@ static void draw_bevel(
     draw_bevel_edges(surface, x, y, width, height, raised);
 }
 
+static uint32_t title_button_size(void) {
+    return title_height - 6u;
+}
+
+static uint32_t close_button_x(const desktop_app_t *app) {
+    return app->surface.width - 6u - title_button_size();
+}
+
+static uint32_t minimize_button_x(const desktop_app_t *app) {
+    return close_button_x(app) - 3u - title_button_size();
+}
+
+static void draw_title_button(
+    argus_surface_t *surface,
+    uint32_t x,
+    const char *label
+) {
+    uint32_t size = title_button_size();
+    uint32_t glyph_width = 5u * scale;
+    uint32_t glyph_height = 7u * scale;
+    draw_bevel(surface, x, 6u, size, size, colors.chrome, 1);
+    surface_draw_text(
+        surface,
+        label,
+        x + (size - glyph_width) / 2u,
+        6u + (size - glyph_height) / 2u,
+        scale,
+        colors.ink
+    );
+}
+
 static uint32_t content_x(void) { return 7u; }
 static uint32_t content_y(void) { return title_height + 8u; }
 
@@ -227,6 +261,8 @@ static void render_chrome(uint32_t app_index) {
         scale,
         colors.terminal_text
     );
+    draw_title_button(surface, minimize_button_x(app), "_");
+    draw_title_button(surface, close_button_x(app), "X");
 }
 
 static uint32_t draw_decimal(
@@ -535,7 +571,7 @@ static void render_applications(void) {
     surface_fill_rect(surface, x, y, width, height, colors.terminal);
     surface_draw_text(
         surface,
-        "UP DOWN  ENTER OPEN  1-6 QUICK",
+        "UP DOWN   ENTER OPEN   ESC CLOSE",
         x + 8u,
         y + 8u,
         scale,
@@ -596,29 +632,49 @@ static void render_panel(void) {
         colors.shadow
     );
 
-    uint32_t next_x = 4u;
     uint32_t height = panel_height - 8u;
-    for (uint32_t i = 0; i < APP_COUNT; ++i) {
-        task_x[i] = next_x;
-        task_width[i] = text_width(apps[i].task, scale) + 16u;
+    launcher_task_x = 4u;
+    launcher_task_width = text_width("APPS", scale) + 16u;
+    draw_bevel(
+        &panel_surface,
+        launcher_task_x,
+        4u,
+        launcher_task_width,
+        height,
+        colors.chrome,
+        active_app != APP_APPLICATIONS
+    );
+    surface_draw_text(
+        &panel_surface,
+        "APPS",
+        launcher_task_x + 8u,
+        (panel_height - 7u * scale) / 2u,
+        scale,
+        colors.ink
+    );
+
+    active_task_x = 0u;
+    active_task_width = 0u;
+    if (active_app != APP_NONE && active_app != APP_APPLICATIONS) {
+        active_task_x = launcher_task_x + launcher_task_width + 4u;
+        active_task_width = text_width(apps[active_app].task, scale) + 16u;
         draw_bevel(
             &panel_surface,
-            task_x[i],
+            active_task_x,
             4u,
-            task_width[i],
+            active_task_width,
             height,
             colors.chrome,
-            i != active_app
+            0
         );
         surface_draw_text(
             &panel_surface,
-            apps[i].task,
-            task_x[i] + 8u,
+            apps[active_app].task,
+            active_task_x + 8u,
             (panel_height - 7u * scale) / 2u,
             scale,
             colors.ink
         );
-        next_x += task_width[i] + 4u;
     }
 }
 
@@ -635,7 +691,10 @@ static int initialize_surfaces(uint32_t width, uint32_t work_height) {
     uint32_t utility_width = width >= 700u ? 400u : width - 24u;
     uint32_t system_height = minimum(238u, work_height - 24u);
     uint32_t files_height = minimum(320u, work_height - 24u);
-    uint32_t applications_height = minimum(320u, work_height - 24u);
+    uint32_t applications_height = minimum(
+        scale == 2u ? 244u : 160u,
+        work_height - 24u
+    );
     uint32_t user_width = ARGUS_APP_SURFACE_WIDTH + 14u;
     uint32_t user_height = title_height + ARGUS_APP_SURFACE_HEIGHT + 15u;
 
@@ -643,7 +702,8 @@ static int initialize_surfaces(uint32_t width, uint32_t work_height) {
     console_height = minimum(console_height, work_height - 24u);
     if (console_width < 320u || console_height < 200u ||
         utility_width < 280u || system_height < 160u || files_height < 200u ||
-        applications_height < 240u || user_width > width - 24u ||
+        applications_height < (scale == 2u ? 220u : 140u) ||
+        user_width > width - 24u ||
         user_height > work_height - 24u)
         return 0;
 
@@ -731,25 +791,67 @@ static int initialize_compositor(const argus_gop_t *g, uint32_t work_height) {
             &apps[APP_NOTES].compositor_id) ||
         !compositor_set_panel(&compositor, &panel_surface, work_height))
         return 0;
-    return compositor_raise_window(
-        &compositor,
-        apps[APP_CONSOLE].compositor_id
-    );
+    for (uint32_t app_index = 0; app_index < APP_COUNT; ++app_index)
+        if (!compositor_set_window_visible(
+                &compositor,
+                apps[app_index].compositor_id,
+                0))
+            return 0;
+    return compositor_visible_window_count(&compositor) == 0u;
 }
 
-static void activate_app(uint32_t app_index) {
-    if (app_index >= APP_COUNT) return;
+static void render_app_content(uint32_t app_index) {
+    if (app_index == APP_SYSTEM) render_system();
+    else if (app_index == APP_FILES) render_files();
+    else if (app_index == APP_APPLICATIONS) render_applications();
+    else if (app_index >= APP_SNAKE && app_index <= APP_NOTES)
+        render_user_app(app_index);
+}
+
+static int hide_active_app(int close_process) {
+    if (active_app == APP_NONE) return 1;
     uint32_t previous = active_app;
-    active_app = app_index;
-    process_app_set_active(apps[app_index].user_app_id);
-    (void)compositor_raise_window(
-        &compositor,
-        apps[app_index].compositor_id
-    );
-    render_chrome(previous);
-    if (previous != app_index) render_chrome(app_index);
-    if (app_index == APP_APPLICATIONS) render_applications();
+    uint32_t app_id = apps[previous].user_app_id;
+    if (!compositor_set_window_visible(
+            &compositor,
+            apps[previous].compositor_id,
+            0))
+        return 0;
+    active_app = APP_NONE;
+    dragging = 0;
+    process_app_set_active(0u);
+    if (close_process && app_id && !process_app_stop(app_id)) return 0;
+    if (app_id && close_process) app_sequences[app_id] = 0u;
     render_panel();
+    return compositor_visible_window_count(&compositor) == 0u;
+}
+
+static int activate_app(uint32_t app_index) {
+    if (app_index >= APP_COUNT) return 0;
+    uint32_t previous = active_app;
+    uint32_t app_id = apps[app_index].user_app_id;
+    if (app_id && !process_app_online(app_id) && !process_app_start(app_id))
+        return 0;
+    if (previous != APP_NONE && previous != app_index &&
+        !compositor_set_window_visible(
+            &compositor,
+            apps[previous].compositor_id,
+            0))
+        return 0;
+    active_app = app_index;
+    process_app_set_active(app_id);
+    render_chrome(app_index);
+    render_app_content(app_index);
+    if (!compositor_set_window_visible(
+            &compositor,
+            apps[app_index].compositor_id,
+            1) ||
+        !compositor_raise_window(
+            &compositor,
+            apps[app_index].compositor_id))
+        return 0;
+    render_panel();
+    return compositor_visible_window_count(&compositor) == 1u;
 }
 
 static uint32_t clamp_pointer_coordinate(int64_t value, uint32_t maximum) {
@@ -769,7 +871,7 @@ int desktop_init(void) {
     panel_height = scale == 2u ? 32u : 24u;
     title_height = scale == 2u ? 24u : 16u;
     uint32_t work_height = g->height - panel_height;
-    active_app = APP_CONSOLE;
+    active_app = APP_NONE;
     pointer_initialized = 0;
     pointer_enabled = 0;
     pointer_visible = 0;
@@ -783,6 +885,10 @@ int desktop_init(void) {
 
     if (!initialize_surfaces(g->width, work_height) ||
         !initialize_compositor(g, work_height)) {
+        destroy_surfaces();
+        return 0;
+    }
+    if (compositor_visible_window_count(&compositor) != 0u) {
         destroy_surfaces();
         return 0;
     }
@@ -833,10 +939,10 @@ int desktop_init(void) {
         destroy_surfaces();
         return 0;
     }
-    desktop_online = 1;
     pointer_x = g->width / 2u;
     pointer_y = work_height / 2u;
     pointer_initialized = 1;
+    desktop_online = 1;
     return 1;
 }
 
@@ -876,32 +982,24 @@ void desktop_tick(uint64_t ticks) {
     if (!desktop_online) return;
     uint64_t bucket = ticks / 100u;
     int app_changed = 0;
-    for (uint32_t app_index = APP_SNAKE; app_index <= APP_NOTES; ++app_index) {
+    if (active_app >= APP_SNAKE && active_app <= APP_NOTES) {
         const uint8_t *pixels;
         uint32_t sequence;
-        uint32_t app_id = apps[app_index].user_app_id;
+        uint32_t app_id = apps[active_app].user_app_id;
         int available = process_app_surface(app_id, &pixels, &sequence);
         if ((available && sequence != app_sequences[app_id]) ||
             (!available && app_sequences[app_id]))
             app_changed = 1;
     }
-    int system_changed = bucket != system_tick_bucket;
+    int system_changed = active_app == APP_SYSTEM &&
+        bucket != system_tick_bucket;
     if (!app_changed && !system_changed) return;
     desktop_pointer_hide();
     if (system_changed) {
         system_tick_bucket = bucket;
         render_system();
     }
-    if (app_changed)
-        for (uint32_t app_index = APP_SNAKE; app_index <= APP_NOTES; ++app_index) {
-            const uint8_t *pixels;
-            uint32_t sequence;
-            uint32_t app_id = apps[app_index].user_app_id;
-            int available = process_app_surface(app_id, &pixels, &sequence);
-            if ((available && sequence != app_sequences[app_id]) ||
-                (!available && app_sequences[app_id]))
-                render_user_app(app_index);
-        }
+    if (app_changed) render_user_app(active_app);
     (void)compositor_present(&compositor);
     desktop_pointer_show();
 }
@@ -919,16 +1017,29 @@ int desktop_focus_app(const char *name) {
              strings_equal(name, "calculator")) app_index = APP_CALCULATOR;
     else if (strings_equal(name, "notes")) app_index = APP_NOTES;
     else return 0;
-    activate_app(app_index);
-    return 1;
+    return activate_app(app_index);
 }
 
 int desktop_key_event(uint8_t key) {
     if (!desktop_online) return 0;
+    if (key == '\t') {
+        if (active_app == APP_APPLICATIONS)
+            (void)hide_active_app(0);
+        else
+            (void)activate_app(APP_APPLICATIONS);
+        (void)compositor_present(&compositor);
+        return 1;
+    }
+    if (key == ARGUS_KEY_ESCAPE) {
+        if (active_app == APP_NONE) return 1;
+        if (!hide_active_app(0)) return 1;
+        (void)compositor_present(&compositor);
+        return 1;
+    }
     if (active_app == APP_APPLICATIONS) {
         if (key >= '1' && key <= '6') {
             launcher_selection = (uint32_t)(key - '1');
-            activate_app(launcher_targets[launcher_selection]);
+            (void)activate_app(launcher_targets[launcher_selection]);
             (void)compositor_present(&compositor);
             return 1;
         } else if (key == ARGUS_KEY_UP) {
@@ -938,7 +1049,7 @@ int desktop_key_event(uint8_t key) {
             launcher_selection =
                 (launcher_selection + 1u) % LAUNCHER_ENTRY_COUNT;
         } else if (key == '\n' || key == '\r') {
-            activate_app(launcher_targets[launcher_selection]);
+            (void)activate_app(launcher_targets[launcher_selection]);
             (void)compositor_present(&compositor);
             return 1;
         } else return 1;
@@ -946,8 +1057,9 @@ int desktop_key_event(uint8_t key) {
         (void)compositor_present(&compositor);
         return 1;
     }
+    if (active_app == APP_NONE) return 0;
     uint32_t app_id = apps[active_app].user_app_id;
-    if (!app_id) return 0;
+    if (!app_id) return active_app != APP_CONSOLE;
     (void)process_app_input(app_id, key);
     return 1;
 }
@@ -997,13 +1109,27 @@ static int panel_app_at(uint32_t x, uint32_t y, uint32_t *app_index) {
     if (y < compositor.panel_y || y >= compositor.height) return 0;
     uint32_t local_y = y - compositor.panel_y;
     if (local_y < 4u || local_y >= panel_height - 4u) return 0;
-    for (uint32_t i = 0; i < APP_COUNT; ++i) {
-        if (x >= task_x[i] && x < task_x[i] + task_width[i]) {
-            *app_index = i;
-            return 1;
-        }
+    if (x >= launcher_task_x &&
+        x < launcher_task_x + launcher_task_width) {
+        *app_index = APP_APPLICATIONS;
+        return 1;
+    }
+    if (active_app != APP_NONE && active_app != APP_APPLICATIONS &&
+        x >= active_task_x && x < active_task_x + active_task_width) {
+        *app_index = active_app;
+        return 1;
     }
     return 0;
+}
+
+static int title_button_at(
+    uint32_t local_x,
+    uint32_t local_y,
+    uint32_t button_x
+) {
+    uint32_t size = title_button_size();
+    return local_x >= button_x && local_x < button_x + size &&
+        local_y >= 6u && local_y < 6u + size;
 }
 
 static int launcher_entry_at(
@@ -1030,14 +1156,23 @@ void desktop_pointer_event(int16_t dx, int16_t dy, uint8_t buttons) {
     if (!pointer_enabled || !desktop_online) return;
     const argus_gop_t *g = gop_info();
     desktop_pointer_hide();
-    pointer_x = clamp_pointer_coordinate((int64_t)pointer_x + dx, g->width - 1u);
-    pointer_y = clamp_pointer_coordinate((int64_t)pointer_y + dy, g->height - 1u);
+    pointer_x = clamp_pointer_coordinate(
+        (int64_t)pointer_x + dx,
+        g->width - POINTER_WIDTH
+    );
+    pointer_y = clamp_pointer_coordinate(
+        (int64_t)pointer_y + dy,
+        g->height - POINTER_HEIGHT
+    );
 
     int left_pressed = (buttons & 1u) && !(pointer_buttons & 1u);
     if (left_pressed) {
         uint32_t app_index;
         if (panel_app_at(pointer_x, pointer_y, &app_index)) {
-            activate_app(app_index);
+            if (app_index == active_app)
+                (void)hide_active_app(0);
+            else
+                (void)activate_app(app_index);
             dragging = 0;
         } else {
             uint32_t window_id;
@@ -1053,12 +1188,22 @@ void desktop_pointer_event(int16_t dx, int16_t dy, uint8_t buttons) {
                 for (app_index = 0; app_index < APP_COUNT; ++app_index)
                     if (apps[app_index].compositor_id == window_id) break;
                 if (app_index < APP_COUNT) {
-                    activate_app(app_index);
+                    (void)activate_app(app_index);
                     uint32_t launcher_entry;
-                    if (app_index == APP_APPLICATIONS &&
+                    if (title_button_at(
+                            local_x,
+                            local_y,
+                            close_button_x(&apps[app_index]))) {
+                        (void)hide_active_app(1);
+                    } else if (title_button_at(
+                            local_x,
+                            local_y,
+                            minimize_button_x(&apps[app_index]))) {
+                        (void)hide_active_app(0);
+                    } else if (app_index == APP_APPLICATIONS &&
                         launcher_entry_at(local_x, local_y, &launcher_entry)) {
                         launcher_selection = launcher_entry;
-                        activate_app(launcher_targets[launcher_entry]);
+                        (void)activate_app(launcher_targets[launcher_entry]);
                     } else if (local_x >= 3u &&
                         local_x < apps[app_index].surface.width - 3u &&
                         local_y >= 3u && local_y < 3u + title_height) {
@@ -1097,18 +1242,43 @@ uint64_t desktop_drag_moves(void) { return drag_moves; }
 uint32_t desktop_pointer_x(void) { return pointer_x; }
 uint32_t desktop_pointer_y(void) { return pointer_y; }
 uint32_t desktop_window_x(void) {
-    return compositor_window_x(&compositor, apps[APP_CONSOLE].compositor_id);
+    return desktop_online && active_app != APP_NONE
+        ? compositor_window_x(&compositor, apps[active_app].compositor_id)
+        : 0u;
 }
 uint32_t desktop_window_y(void) {
-    return compositor_window_y(&compositor, apps[APP_CONSOLE].compositor_id);
+    return desktop_online && active_app != APP_NONE
+        ? compositor_window_y(&compositor, apps[active_app].compositor_id)
+        : 0u;
 }
 uint32_t desktop_surface_count(void) { return desktop_online ? APP_COUNT : 0u; }
+uint32_t desktop_visible_window_count(void) {
+    return desktop_online ? compositor_visible_window_count(&compositor) : 0u;
+}
 const char *desktop_active_app(void) {
-    return desktop_online ? apps[active_app].title : "UNAVAILABLE";
+    if (!desktop_online) return "UNAVAILABLE";
+    return active_app == APP_NONE ? "DESKTOP" : apps[active_app].title;
+}
+int desktop_single_window_mode(void) {
+    if (!desktop_online) return 0;
+    uint32_t visible = compositor_visible_window_count(&compositor);
+    return visible <= 1u &&
+        ((active_app == APP_NONE && visible == 0u) ||
+         (active_app < APP_COUNT && visible == 1u &&
+          compositor_window_visible(
+              &compositor,
+              apps[active_app].compositor_id)));
+}
+int desktop_pointer_confined(void) {
+    if (!desktop_online || !pointer_initialized) return 0;
+    const argus_gop_t *g = gop_info();
+    return pointer_x <= g->width - POINTER_WIDTH &&
+        pointer_y <= g->height - POINTER_HEIGHT;
 }
 uint64_t desktop_compositor_frames(void) { return compositor.frame_count; }
 uint64_t desktop_damage_pixels(void) { return compositor.damage_pixels; }
 uint32_t desktop_last_damage_count(void) { return compositor.last_damage_count; }
 int desktop_compositor_valid(void) {
-    return desktop_online && compositor_validate(&compositor);
+    return desktop_online && compositor_validate(&compositor) &&
+        desktop_single_window_mode() && desktop_pointer_confined();
 }

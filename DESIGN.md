@@ -185,16 +185,18 @@ highlight and one shadow line. Never stack ornamental borders.
 
 ### Navigation
 
-The bottom panel shows running tasks only. Each item must focus and raise its
-window. `APPS` opens the functional Applications surface; no separate ornamental
-start control is added. Active items use an inverted bevel.
+The desktop starts with no open windows. The bottom panel always shows `APPS`
+and, while a window is visible, exactly one current-task control. `APPS` opens
+the functional Applications surface and hides the current window. Clicking the
+current task minimizes it. Active items use an inverted bevel.
 
 ### Applications Launcher
 
 Applications is a real launcher surface, not a web browser or static menu. It
 lists installed windows, distinguishes kernel services from user processes, and
-supports Up/Down plus Enter, 1-6 shortcuts, and clickable rows. Selection uses a
-single warm-chrome row with near-ink text.
+supports Tab to open, Up/Down plus Enter, 1-6 shortcuts, and clickable rows.
+Selection uses a single warm-chrome row with near-ink text. Opening a row replaces
+the launcher; windows never accumulate behind it.
 
 ### Terminal Window
 
@@ -235,9 +237,12 @@ only security signal, and the initial browser has no unsafe proceed action.
 
 ### Focus and Composition
 
-Faded Slate marks the focused title only. Inactive titles use Chrome Shadow.
-Clicking a title or task raises the window. Window movement is immediate and
-uses damage composition without decorative animation.
+Faded Slate marks the one visible window title. A window has working minimize
+and close controls; closing a user app also stops its process. Escape minimizes
+the visible window and returns to the clean desktop. Window movement is immediate
+and uses damage composition without decorative animation. The pointer bitmap is
+confined in full at all four framebuffer edges, and the supported QEMU launcher
+captures relative input so host pointer movement cannot interrupt edge travel.
 
 ## 6. Do's and Don'ts
 

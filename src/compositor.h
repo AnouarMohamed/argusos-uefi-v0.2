@@ -68,6 +68,18 @@ int compositor_raise_window(
     argus_compositor_t *compositor,
     uint32_t window_id
 );
+int compositor_set_window_visible(
+    argus_compositor_t *compositor,
+    uint32_t window_id,
+    int visible
+);
+int compositor_window_visible(
+    const argus_compositor_t *compositor,
+    uint32_t window_id
+);
+uint32_t compositor_visible_window_count(
+    const argus_compositor_t *compositor
+);
 int compositor_window_at(
     const argus_compositor_t *compositor,
     uint32_t x,

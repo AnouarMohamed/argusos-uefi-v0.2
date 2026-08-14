@@ -75,6 +75,10 @@ BOOT_MARKERS = (
     b"SURFACE_SELF_TEST_PASS",
     b"COMPOSITOR_ONLINE",
     b"DESKTOP_APPS_ONLINE",
+    b"CLEAN_DESKTOP_ONLINE",
+    b"SINGLE_WINDOW_DESKTOP_PASS",
+    b"POINTER_CONFINEMENT_PASS",
+    b"WINDOW_CONTROLS_ONLINE",
     b"SNAKE_APP_ONLINE",
     b"CALCULATOR_APP_ONLINE",
     b"NOTES_APP_ONLINE",
@@ -193,6 +197,18 @@ def verify_desktop_capture(path: Path) -> None:
     for name, rgb in DESKTOP_PALETTE.items():
         if rgb not in capture:
             raise ToolError(f"framebuffer capture is missing desktop color: {name}")
+
+
+def verify_clean_desktop_capture(path: Path) -> None:
+    capture = path.read_bytes()
+    if not capture.startswith(b"P6\n"):
+        raise ToolError("QEMU framebuffer capture is not a binary PPM image")
+    for name in ("field olive", "warm chrome"):
+        if DESKTOP_PALETTE[name] not in capture:
+            raise ToolError(f"clean desktop is missing color: {name}")
+    for name in ("terminal ink", "slate title"):
+        if DESKTOP_PALETTE[name] in capture:
+            raise ToolError(f"clean desktop unexpectedly contains a window: {name}")
 
 
 def verify_snake_capture(path: Path) -> None:
@@ -374,6 +390,15 @@ class QmpClient:
         if events:
             self.execute("input-send-event", {"events": events})
 
+    def move_pointer_bounded(self, dx: int, dy: int) -> None:
+        while dx or dy:
+            step_x = max(-127, min(127, dx))
+            step_y = max(-127, min(127, dy))
+            self.move_pointer(step_x, step_y)
+            dx -= step_x
+            dy -= step_y
+            time.sleep(0.03)
+
     def pointer_button(self, button: str, down: bool) -> None:
         self.execute(
             "input-send-event",
@@ -392,15 +417,17 @@ def qemu_command(
     ovmf_vars: Path,
     image: Path,
     qmp_socket: Path | None = None,
+    display: str = "none",
+    accel: str = "tcg",
 ) -> tuple[str, ...]:
     command = [
         qemu,
         "-display",
-        "none",
+        display,
         "-serial",
         "stdio",
         "-machine",
-        "q35,accel=tcg",
+        f"q35,accel={accel}",
         "-m",
         memory,
         "-drive",
@@ -425,9 +452,46 @@ def qemu_command(
         "none",
         "-nodefaults",
     ]
+    if accel == "kvm":
+        command.extend(("-cpu", "host"))
     if qmp_socket is not None:
         command.extend(("-qmp", f"unix:{qmp_socket},server=on,wait=off"))
     return tuple(command)
+
+
+def run_interactive(args: argparse.Namespace) -> None:
+    qemu = require_executable(args.qemu)
+    if not args.image.is_file():
+        raise ToolError(f"test image not found: {args.image}")
+    ovmf_code, ovmf_template = locate_ovmf(args.ovmf_code, args.ovmf_vars)
+    accel = args.accel
+    if accel == "auto":
+        accel = "kvm" if os.access("/dev/kvm", os.R_OK | os.W_OK) else "tcg"
+    if accel == "kvm" and not os.access("/dev/kvm", os.R_OK | os.W_OK):
+        raise ToolError("KVM requested but /dev/kvm is not accessible")
+
+    with tempfile.TemporaryDirectory(prefix="argusos-run-") as temporary:
+        ovmf_vars = Path(temporary) / "OVMF_VARS.fd"
+        shutil.copyfile(ovmf_template, ovmf_vars)
+        display = (
+            "gtk,grab-on-hover=on,show-cursor=off,"
+            "show-menubar=off,window-close=on"
+        )
+        command = qemu_command(
+            qemu,
+            args.memory,
+            ovmf_code,
+            ovmf_vars,
+            args.image.resolve(),
+            display=display,
+            accel=accel,
+        )
+        print(f"Launching ArgusOS with {accel.upper()} acceleration.")
+        print("The VM captures the pointer on hover; press Ctrl+Alt+G to release it.")
+        try:
+            subprocess.run(command, check=True)
+        except subprocess.CalledProcessError as error:
+            raise ToolError(f"QEMU exited with status {error.returncode}") from error
 
 
 def run_smoke(args: argparse.Namespace) -> None:
@@ -459,23 +523,63 @@ def run_smoke(args: argparse.Namespace) -> None:
         qmp.execute("screendump", {"filename": str(args.screenshot.resolve())})
         if not args.screenshot.is_file():
             raise ToolError("QEMU did not create the framebuffer screenshot")
-        verify_desktop_capture(args.screenshot)
+        verify_clean_desktop_capture(args.screenshot)
+
+        session.send(b"apps\r")
+        session.expect(b"Visible windows: 0", args.timeout)
+        session.expect(b"Active app: DESKTOP", args.timeout)
+        session.expect(b"SINGLE_WINDOW_DESKTOP_OK", args.timeout)
+        session.expect(b"argus-kernel> ", args.timeout)
+
+        qmp.send_key("tab")
+        time.sleep(0.2)
+        session.send(b"apps\r")
+        session.expect(b"Visible windows: 1", args.timeout)
+        session.expect(b"Active app: APPLICATIONS", args.timeout)
+        session.expect(b"SINGLE_WINDOW_DESKTOP_OK", args.timeout)
+        session.expect(b"argus-kernel> ", args.timeout)
+        qmp.send_key("esc")
+        time.sleep(0.2)
+        session.send(b"apps\r")
+        session.expect(b"Visible windows: 0", args.timeout)
+        session.expect(b"Active app: DESKTOP", args.timeout)
+        session.expect(b"SINGLE_WINDOW_DESKTOP_OK", args.timeout)
+        session.expect(b"argus-kernel> ", args.timeout)
+
+        qmp.move_pointer_bounded(-1024, -1024)
+        time.sleep(0.15)
+        session.send(b"ui\r")
+        session.expect(b"Pointer position: 0,0", args.timeout)
+        session.expect(b"POINTER_CONFINEMENT_OK", args.timeout)
+        session.expect(b"COMPOSITOR_DAMAGE_OK", args.timeout)
+        session.expect(b"argus-kernel> ", args.timeout)
 
         for command, marker in SHELL_PROBES:
             session.send(command)
             session.expect(marker, args.timeout)
             session.expect(b"argus-kernel> ", args.timeout)
 
+        qmp.send_key("x")
+        time.sleep(0.15)
+        session.send(b"status\r")
+        session.expect(b"STATUS_OK", args.timeout)
+        session.expect(b"argus-kernel> ", args.timeout)
+
+        session.send(b"focus console\r")
+        session.expect(b"APP_FOCUS_OK", args.timeout)
+        session.expect(b"argus-kernel> ", args.timeout)
         for key in "irqtest":
             qmp.send_key(key)
         qmp.send_key("ret")
         session.expect(b"PS2_IRQ_INPUT_OK", args.timeout)
         session.expect(b"argus-kernel> ", args.timeout)
 
-        session.send(b"focus apps\r")
-        session.expect(b"APP_FOCUS_OK", args.timeout)
-        session.expect(b"argus-kernel> ", args.timeout)
+        qmp.move_pointer_bounded(34, 784)
+        qmp.pointer_button("left", True)
+        qmp.pointer_button("left", False)
+        time.sleep(0.2)
         session.send(b"apps\r")
+        session.expect(b"Visible windows: 1", args.timeout)
         session.expect(b"Active app: APPLICATIONS", args.timeout)
         session.expect(b"COMPOSITOR_APPS_OK", args.timeout)
         session.expect(b"argus-kernel> ", args.timeout)
@@ -489,6 +593,7 @@ def run_smoke(args: argparse.Namespace) -> None:
         qmp.send_key("5")
         time.sleep(0.35)
         session.send(b"apps\r")
+        session.expect(b"Visible windows: 1", args.timeout)
         session.expect(b"Active app: CALCULATOR", args.timeout)
         session.expect(b"COMPOSITOR_APPS_OK", args.timeout)
         session.expect(b"argus-kernel> ", args.timeout)
@@ -509,6 +614,21 @@ def run_smoke(args: argparse.Namespace) -> None:
         if not args.calculator_screenshot.is_file():
             raise ToolError("QEMU did not create the Calculator screenshot")
         verify_snake_capture(args.calculator_screenshot)
+
+        # 1280x800 smoke mode: click Calculator's functional close control.
+        qmp.move_pointer_bounded(782, -678)
+        qmp.pointer_button("left", True)
+        qmp.pointer_button("left", False)
+        time.sleep(0.2)
+        session.send(b"apps\r")
+        session.expect(b"Visible windows: 0", args.timeout)
+        session.expect(b"Active app: DESKTOP", args.timeout)
+        session.expect(b"SINGLE_WINDOW_DESKTOP_OK", args.timeout)
+        session.expect(b"argus-kernel> ", args.timeout)
+        session.send(b"userapps\r")
+        session.expect(b"Calculator: offline", args.timeout)
+        session.expect(b"USER_APPS_OK", args.timeout)
+        session.expect(b"argus-kernel> ", args.timeout)
 
         session.send(b"focus notes\r")
         session.expect(b"APP_FOCUS_OK", args.timeout)
@@ -541,6 +661,7 @@ def run_smoke(args: argparse.Namespace) -> None:
         session.expect(b"SNAKE_FRAME_OK", args.timeout)
         session.expect(b"argus-kernel> ", args.timeout)
         session.send(b"apps\r")
+        session.expect(b"Visible windows: 1", args.timeout)
         session.expect(b"Active app: SNAKE", args.timeout)
         session.expect(b"COMPOSITOR_APPS_OK", args.timeout)
         session.expect(b"argus-kernel> ", args.timeout)
@@ -550,6 +671,14 @@ def run_smoke(args: argparse.Namespace) -> None:
         if not args.snake_screenshot.is_file():
             raise ToolError("QEMU did not create the Snake app screenshot")
         verify_snake_capture(args.snake_screenshot)
+
+        qmp.send_key("esc")
+        time.sleep(0.2)
+        session.send(b"apps\r")
+        session.expect(b"Visible windows: 0", args.timeout)
+        session.expect(b"Active app: DESKTOP", args.timeout)
+        session.expect(b"SINGLE_WINDOW_DESKTOP_OK", args.timeout)
+        session.expect(b"argus-kernel> ", args.timeout)
     finally:
         try:
             if qmp is not None:
@@ -607,6 +736,19 @@ def build_parser() -> argparse.ArgumentParser:
     image.add_argument("--efi", type=Path, required=True, help="BOOTX64.EFI input")
     image.add_argument("--output", type=Path, required=True, help="disk image output")
     image.add_argument("--size", type=int, default=64, help="image size in MiB")
+
+    run = subparsers.add_parser("run", help="launch the graphical VM safely")
+    run.add_argument("--image", type=Path, required=True, help="FAT boot image")
+    run.add_argument("--memory", default="1G", help="QEMU guest memory")
+    run.add_argument(
+        "--accel",
+        choices=("auto", "kvm", "tcg"),
+        default="auto",
+        help="QEMU acceleration mode",
+    )
+    run.add_argument("--qemu", default="qemu-system-x86_64")
+    run.add_argument("--ovmf-code", type=Path)
+    run.add_argument("--ovmf-vars", type=Path)
 
     smoke = subparsers.add_parser("smoke", help="boot and probe the native shell")
     smoke.add_argument("--efi", type=Path, required=True, help="BOOTX64.EFI input")
@@ -672,6 +814,8 @@ def main() -> None:
         if args.operation == "image":
             create_fat_image(args.efi, args.output, args.size)
             print(f"Created UEFI test image: {args.output}")
+        elif args.operation == "run":
+            run_interactive(args)
         elif args.operation == "smoke":
             run_smoke(args)
         else:

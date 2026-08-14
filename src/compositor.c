@@ -187,6 +187,44 @@ int compositor_raise_window(
     return 1;
 }
 
+int compositor_set_window_visible(
+    argus_compositor_t *compositor,
+    uint32_t window_id,
+    int visible
+) {
+    if (!compositor || window_id >= compositor->window_count) return 0;
+    argus_compositor_window_t *window = &compositor->windows[window_id];
+    int next = visible != 0;
+    if (window->visible == next) return 1;
+    compositor_damage(
+        compositor,
+        window->x,
+        window->y,
+        window->surface->width,
+        window->surface->height
+    );
+    window->visible = next;
+    return 1;
+}
+
+int compositor_window_visible(
+    const argus_compositor_t *compositor,
+    uint32_t window_id
+) {
+    return compositor && window_id < compositor->window_count &&
+        compositor->windows[window_id].visible;
+}
+
+uint32_t compositor_visible_window_count(
+    const argus_compositor_t *compositor
+) {
+    if (!compositor) return 0u;
+    uint32_t count = 0u;
+    for (uint32_t id = 0; id < compositor->window_count; ++id)
+        if (compositor->windows[id].visible) ++count;
+    return count;
+}
+
 int compositor_window_at(
     const argus_compositor_t *compositor,
     uint32_t x,

@@ -144,7 +144,7 @@ jobs:
 
       - name: Validate smoke-test transcript
         run: |
-          grep -Fq "ArgusOS UEFI Study Monitor v0.21" qemu.log
+          grep -Fq "ArgusOS UEFI Study Monitor v0.22" qemu.log
           grep -Fq "ARGUS_KERNEL_ONLINE" qemu.log
           grep -Fq "BOOT_SERVICES_EXITED" qemu.log
           grep -Fq "PMM_SELF_TEST_PASS" qemu.log
@@ -201,6 +201,10 @@ jobs:
           grep -Fq "SURFACE_SELF_TEST_PASS" qemu.log
           grep -Fq "COMPOSITOR_ONLINE" qemu.log
           grep -Fq "DESKTOP_APPS_ONLINE" qemu.log
+          grep -Fq "CLEAN_DESKTOP_ONLINE" qemu.log
+          grep -Fq "SINGLE_WINDOW_DESKTOP_PASS" qemu.log
+          grep -Fq "POINTER_CONFINEMENT_PASS" qemu.log
+          grep -Fq "WINDOW_CONTROLS_ONLINE" qemu.log
           grep -Fq "SNAKE_APP_ONLINE" qemu.log
           grep -Fq "CALCULATOR_APP_ONLINE" qemu.log
           grep -Fq "NOTES_APP_ONLINE" qemu.log
@@ -210,7 +214,13 @@ jobs:
           grep -Fq "PS2_MOUSE_IRQ_ONLINE" qemu.log
           grep -Fq "PS2_IRQ_INPUT_OK" qemu.log
           grep -Fq "COMPOSITOR_APPS_OK" qemu.log
+          grep -Fq "SINGLE_WINDOW_DESKTOP_OK" qemu.log
+          grep -Fq "POINTER_CONFINEMENT_OK" qemu.log
           grep -Fq "APP_FOCUS_OK" qemu.log
+          grep -Fq "Visible windows: 0" qemu.log
+          grep -Fq "Visible windows: 1" qemu.log
+          grep -Fq "Active app: DESKTOP" qemu.log
+          grep -Fq "Calculator: offline" qemu.log
           grep -Fq "Active app: APPLICATIONS" qemu.log
           grep -Fq "Active app: CALCULATOR" qemu.log
           grep -Fq "Active app: SNAKE" qemu.log

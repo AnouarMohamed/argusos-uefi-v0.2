@@ -93,6 +93,7 @@ static int decode_scan_code(uint8_t scan_code) {
     if (scan_code == 0x2Au) { left_shift = !released; return -1; }
     if (scan_code == 0x36u) { right_shift = !released; return -1; }
     if (released) return -1;
+    if (scan_code == 0x01u) return ARGUS_KEY_ESCAPE;
     if (scan_code == 0x3Au) { caps_lock = !caps_lock; return -1; }
     if (scan_code == 0x1Cu) return '\n';
     if (scan_code == 0x0Eu) return '\b';

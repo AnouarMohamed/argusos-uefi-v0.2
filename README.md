@@ -1,4 +1,4 @@
-# ArgusOS UEFI Study Kernel v0.21
+# ArgusOS UEFI Study Kernel v0.22
 
 A deliberately small x86-64 UEFI bare-metal study kernel.
 
@@ -36,9 +36,9 @@ kernel with framebuffer and direct COM1 output.
   Enter, Backspace, Tab, and extended arrow keys without firmware services.
 - A post-firmware kernel monitor accepts commands through COM1 or PS/2 while
   rendering to the framebuffer and serial terminal.
-- A restrained ArgusOS desktop composites seven retained windows with focus,
-  z-order, damage tracking, dragging, a software pointer, and a navigable
-  Applications launcher.
+- A restrained ArgusOS desktop starts with a clean workspace and exposes seven
+  retained surfaces through a single-window launcher. Windows support focus,
+  dragging, minimize, close, and a bounded software pointer.
 - Versioned, validated C ABIs host statically linked `no_std` Rust checksum,
   RAMFS, FAT32, and network-core components without giving Rust boot, allocator,
   interrupt, or device ownership.
@@ -137,7 +137,9 @@ boots with a standard VGA device, requires keyboard and mouse IRQ markers, opens
 the Applications launcher, launches Calculator through its keyboard shortcut,
 computes a result, edits Notes, and exercises Snake movement. It captures each
 user app and requires validated frame and focused-input diagnostics.
-The defining palette colors are verified in every framebuffer capture.
+The initial capture must contain no open window, each later capture must contain
+exactly the selected app, and pointer tests drive the cursor to the top-left
+boundary. The defining palette colors are verified in every app capture.
 The sparse in-memory FAT32 device remains available as a deterministic fallback.
 
 The media creation, OVMF discovery, serial synchronization, and shell probes are
@@ -148,9 +150,14 @@ Useful host targets:
 ```sh
 make host-check  # syntax-check the Python host tool
 make test-image  # create build/argus-test.img
+make run         # launch the graphical VM with KVM when available
 make smoke       # build, boot QEMU/OVMF, and probe the native shell
 make fault-check # require breakpoint, guard-page, and double-fault diagnostics
 ```
+
+`make run` locates the installed OVMF pair, uses a disposable writable firmware
+variables image, keeps both test NICs disconnected, hides the host cursor, and
+grabs pointer input on hover. Press `Ctrl+Alt+G` to release the pointer from QEMU.
 
 To create the removable-media directory structure:
 
@@ -272,8 +279,8 @@ src/input.c     unified nonblocking COM1/PS2 input selection
 src/kconsole.c  post-firmware framebuffer/serial console
 src/kernel_shell.c native post-firmware command monitor
 src/surface.c   heap-backed retained pixel surfaces, damage bounds, text, and scroll
-src/compositor.c clipped damage composition, window positions, z-order, and hit tests
-src/desktop.c   desktop policy, pointer, task switching, and built-in utility apps
+src/compositor.c clipped damage composition, visibility, positions, z-order, and hit tests
+src/desktop.c   single-window desktop policy, pointer, controls, launcher, and utilities
 src/memory.c    freestanding memset/memcpy/memmove/memcmp primitives
 src/module_abi.h versioned cross-language descriptor and function contract
 src/module.c     C-side module validation, registry, and boot self-test
@@ -321,6 +328,7 @@ docs/process-runtime-v0.19.md ELF lifecycle, fault containment, waits, and preem
 docs/browser-security-roadmap.md mandatory security gates for Internet browsing
 docs/anonymity-boundary-v0.20.md capability, IPC, Tor-role, and fail-closed policy
 docs/network-foundation-v0.21.md quarantined NIC and Rust packet/TCP core
+docs/desktop-ux-v0.22.md clean startup, single-window controls, and pointer capture
 PRODUCT.md      product intent, personality, anti-references, and principles
 DESIGN.md       normative ArgusOS desktop tokens and component rules
 ```
@@ -617,6 +625,24 @@ TLS provider, and signed updates exist. The browser requirements are fixed in
 `docs/browser-security-roadmap.md`; Internet
 access stays disabled until those security gates are met.
 
+### Stage R: desktop interaction correction, completed in v0.22
+
+Implemented:
+
+- a clean startup workspace with no application windows forced open
+- an `APPS` launcher control, a Tab shortcut, and one current-task panel control
+- a compositor invariant that permits zero or one visible window
+- state-preserving switching between applications
+- functional title-bar minimize and close controls, with user-process teardown on close
+- Escape-to-desktop and suppression of hidden console typing behind utility windows
+- cursor-body confinement on every framebuffer edge
+- a graphical `make run` path with automatic KVM selection and QEMU pointer capture
+- QEMU checks for clean startup, one-window visibility, top-left pointer reach,
+  launcher navigation, application input, and return to the empty desktop
+
+The next platform work remains DMA confinement and reset-safe VirtIO queue
+bring-up. The corrected desktop does not change the fail-closed network policy.
+
 ## Exercises
 
 1. Add `cpuid 7` and print AVX2/SMEP/SMAP bits.
@@ -639,7 +665,7 @@ contain early stack failures, while a volatile Rust RAMFS supplies the first fil
 namespace and a read-only Rust parser consumes sectors from the first block-device
 contract. A quarantined NIC and Rust packet core now provide a deliberately
 disconnected network foundation. It is a real kernel boundary, while still being
-far from a general-purpose OS. Its graphical desktop now has retained surfaces, four
-kernel-hosted service windows, three persistent C++ ring-3 apps, a launcher,
-focus, z-order, and damage-aware movement. It is a real early multi-process GUI,
-with dynamic application lifecycle and user-fault containment.
+far from a general-purpose OS. Its graphical desktop starts empty and shows at
+most one of four kernel-hosted service windows or three persistent C++ ring-3
+apps. The launcher, window controls, focus, damage-aware movement, dynamic app
+lifecycle, and user-fault containment are functional rather than decorative.
