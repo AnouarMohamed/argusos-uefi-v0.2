@@ -10,6 +10,8 @@ uint64_t pid();
 uint64_t ticks();
 uint64_t input_poll();
 void yield();
+void wait_until(uint64_t deadline);
+void wait_for_input();
 [[noreturn]] void exit(uint64_t status);
 bool present(uint32_t sequence);
 

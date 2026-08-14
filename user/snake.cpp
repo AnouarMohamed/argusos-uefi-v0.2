@@ -5,7 +5,6 @@
 
 namespace {
 
-constexpr uint64_t kSnakePid = 3u;
 constexpr uint64_t kStepTicks = 12u;
 
 class SnakeGame {
@@ -160,7 +159,7 @@ private:
 
 extern "C" [[noreturn]] __attribute__((section(".text.start")))
 void argus_user_start(uint64_t pid) {
-    if (pid != kSnakePid || argus::pid() != pid) argus::exit(1u);
+    if (!pid || argus::pid() != pid) argus::exit(1u);
     uint64_t now = argus::ticks();
     SnakeGame game(static_cast<uint32_t>(now ^ (pid * 0x9E3779B9u)));
     uint32_t sequence = 0u;
@@ -179,6 +178,6 @@ void argus_user_start(uint64_t pid) {
             game.step();
         }
         if (game.dirty()) { game.draw(); (void)argus::present(++sequence); }
-        argus::yield();
+        argus::wait_until(previous_step + kStepTicks);
     }
 }

@@ -235,23 +235,25 @@ arch_resume_user:
     mov ds, ax
     mov es, ax
     push 0x1b
-    push qword ptr [r10 + 120]
-    push qword ptr [r10 + 112]
+    push qword ptr [r10 + 136]
+    push qword ptr [r10 + 128]
     push 0x23
-    push qword ptr [r10 + 104]
+    push qword ptr [r10 + 120]
     mov r15, qword ptr [r10 + 0]
     mov r14, qword ptr [r10 + 8]
     mov r13, qword ptr [r10 + 16]
     mov r12, qword ptr [r10 + 24]
-    mov r9, qword ptr [r10 + 40]
-    mov r8, qword ptr [r10 + 48]
-    mov rdi, qword ptr [r10 + 56]
-    mov rsi, qword ptr [r10 + 64]
-    mov rbp, qword ptr [r10 + 72]
-    mov rdx, qword ptr [r10 + 80]
-    mov rbx, qword ptr [r10 + 88]
-    mov rax, qword ptr [r10 + 96]
-    mov r10, qword ptr [r10 + 32]
+    mov r9, qword ptr [r10 + 48]
+    mov r8, qword ptr [r10 + 56]
+    mov rdi, qword ptr [r10 + 64]
+    mov rsi, qword ptr [r10 + 72]
+    mov rbp, qword ptr [r10 + 80]
+    mov rdx, qword ptr [r10 + 88]
+    mov rbx, qword ptr [r10 + 104]
+    mov rax, qword ptr [r10 + 112]
+    mov rcx, qword ptr [r10 + 96]
+    mov r11, qword ptr [r10 + 32]
+    mov r10, qword ptr [r10 + 40]
     iretq
 
 .globl syscall_entry
@@ -262,18 +264,20 @@ syscall_entry:
     mov qword ptr [rip + syscall_context + 8], r14
     mov qword ptr [rip + syscall_context + 16], r13
     mov qword ptr [rip + syscall_context + 24], r12
-    mov qword ptr [rip + syscall_context + 32], r10
-    mov qword ptr [rip + syscall_context + 40], r9
-    mov qword ptr [rip + syscall_context + 48], r8
-    mov qword ptr [rip + syscall_context + 56], rdi
-    mov qword ptr [rip + syscall_context + 64], rsi
-    mov qword ptr [rip + syscall_context + 72], rbp
-    mov qword ptr [rip + syscall_context + 80], rdx
-    mov qword ptr [rip + syscall_context + 88], rbx
-    mov qword ptr [rip + syscall_context + 96], rax
-    mov qword ptr [rip + syscall_context + 104], rcx
-    mov qword ptr [rip + syscall_context + 112], r11
-    mov qword ptr [rip + syscall_context + 120], rsp
+    mov qword ptr [rip + syscall_context + 32], r11
+    mov qword ptr [rip + syscall_context + 40], r10
+    mov qword ptr [rip + syscall_context + 48], r9
+    mov qword ptr [rip + syscall_context + 56], r8
+    mov qword ptr [rip + syscall_context + 64], rdi
+    mov qword ptr [rip + syscall_context + 72], rsi
+    mov qword ptr [rip + syscall_context + 80], rbp
+    mov qword ptr [rip + syscall_context + 88], rdx
+    mov qword ptr [rip + syscall_context + 96], rcx
+    mov qword ptr [rip + syscall_context + 104], rbx
+    mov qword ptr [rip + syscall_context + 112], rax
+    mov qword ptr [rip + syscall_context + 120], rcx
+    mov qword ptr [rip + syscall_context + 128], r11
+    mov qword ptr [rip + syscall_context + 136], rsp
 
     mov ax, 0x10
     mov ds, ax
@@ -295,18 +299,18 @@ syscall_entry:
     mov r14, qword ptr [r11 + 8]
     mov r13, qword ptr [r11 + 16]
     mov r12, qword ptr [r11 + 24]
-    mov r10, qword ptr [r11 + 32]
-    mov r9, qword ptr [r11 + 40]
-    mov r8, qword ptr [r11 + 48]
-    mov rdi, qword ptr [r11 + 56]
-    mov rsi, qword ptr [r11 + 64]
-    mov rbp, qword ptr [r11 + 72]
-    mov rdx, qword ptr [r11 + 80]
-    mov rbx, qword ptr [r11 + 88]
-    mov rcx, qword ptr [r11 + 104]
-    mov rsp, qword ptr [r11 + 120]
-    mov rax, qword ptr [r11 + 96]
-    mov r11, qword ptr [r11 + 112]
+    mov r10, qword ptr [r11 + 40]
+    mov r9, qword ptr [r11 + 48]
+    mov r8, qword ptr [r11 + 56]
+    mov rdi, qword ptr [r11 + 64]
+    mov rsi, qword ptr [r11 + 72]
+    mov rbp, qword ptr [r11 + 80]
+    mov rdx, qword ptr [r11 + 88]
+    mov rbx, qword ptr [r11 + 104]
+    mov rcx, qword ptr [r11 + 120]
+    mov rsp, qword ptr [r11 + 136]
+    mov rax, qword ptr [r11 + 112]
+    mov r11, qword ptr [r11 + 128]
     sysretq
 
 .Luser_return_to_kernel:
@@ -379,6 +383,21 @@ user_probe_start:
 .globl user_probe_end
 user_probe_end:
 
+.p2align 4
+.globl user_fault_probe_start
+user_fault_probe_start:
+    ud2
+.globl user_fault_probe_end
+user_fault_probe_end:
+
+.p2align 4
+.globl user_spin_probe_start
+user_spin_probe_start:
+    pause
+    jmp user_spin_probe_start
+.globl user_spin_probe_end
+user_spin_probe_end:
+
 .bss
 .p2align 4
 .globl syscall_kernel_rsp
@@ -389,7 +408,7 @@ arch_user_return_rsp:
 arch_user_return_action:
     .quad 0
 syscall_context:
-    .zero 128
+    .zero 144
 
 .text
 
@@ -470,6 +489,12 @@ isr_common:
     call interrupt_dispatch
     mov rsp, r15
 
+    test rax, rax
+    je .Linterrupt_iret
+    mov qword ptr [rip + arch_user_return_action], rax
+    jmp .Luser_return_to_kernel
+
+.Linterrupt_iret:
     pop r15
     pop r14
     pop r13

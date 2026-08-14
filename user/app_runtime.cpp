@@ -99,6 +99,10 @@ uint64_t pid() { return syscall0(ARGUS_SYSCALL_GETPID); }
 uint64_t ticks() { return syscall0(ARGUS_SYSCALL_CLOCK_TICKS); }
 uint64_t input_poll() { return syscall0(ARGUS_SYSCALL_INPUT_POLL); }
 void yield() { (void)syscall0(ARGUS_SYSCALL_YIELD); }
+void wait_until(uint64_t deadline) {
+    (void)syscall1(ARGUS_SYSCALL_EVENT_WAIT, deadline);
+}
+void wait_for_input() { wait_until(UINT64_MAX); }
 [[noreturn]] void exit(uint64_t status) {
     (void)syscall1(ARGUS_SYSCALL_EXIT, status);
     for (;;) __asm__ volatile("ud2");

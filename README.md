@@ -1,4 +1,4 @@
-# ArgusOS UEFI Study Kernel v0.17
+# ArgusOS UEFI Study Kernel v0.19
 
 A deliberately small x86-64 UEFI bare-metal study kernel.
 
@@ -59,10 +59,14 @@ kernel with framebuffer and direct COM1 output.
   8.3 entries, and follows FAT chains through the block-device boundary.
 - Two boot probe processes execute at CPU privilege level 3 with private CR3
   roots, separate code/stack pages, an unmapped stack guard, and W^X mappings.
-- A versioned syscall ABI provides bounded serial writes, PID lookup, cooperative
-  yield, and exit through x86-64 `SYSCALL`/`SYSRET` transitions.
-- A minimal round-robin scheduler preserves user register state across yields and
-  proves that both isolated probe processes resume and exit successfully.
+- A versioned syscall ABI provides bounded serial writes, PID lookup, blocking
+  event waits, cooperative yield, and exit through x86-64 transitions.
+- A timer-preemptible round-robin scheduler preserves complete user integer state,
+  wakes apps for input or deadlines, and contains ring-3 exceptions per process.
+- A strict ELF64 loader rejects malformed, overlapping, out-of-range, and writable
+  executable images before mapping app pages.
+- App start, stop, and restart operations assign dynamic PIDs and release private
+  page tables, image pages, stacks, and shared surfaces.
 - Three persistent freestanding C++20 apps run at ring 3 with no standard library,
   exceptions, RTTI, writable globals, allocator, or direct hardware access.
 - Snake, Calculator, and Notes share a versioned indexed-color surface and focused
@@ -79,12 +83,12 @@ machines whose firmware does not expose a PS/2-compatible keyboard will need an
 xHCI/USB HID driver. Storage currently supports the first 512-byte-sector LBA48
 SATA device on the first discovered AHCI controller, using polling and a one-sector
 DMA bounce buffer. There is no partition-table traversal, AHCI interrupt/NCQ path,
-hotplug, storage write path, preemptive scheduler, ELF loader, dynamic process
-creation, user-mode fault recovery, general IPC, networking, USB HID stack,
-user-space display server, or SMP startup. Console, System, Files, and the
-Applications launcher remain kernel-hosted desktop services. The three v0.17 user
-apps are still embedded flat images and cooperatively scheduled. There is no web
-browser: networking, sockets, DNS, TLS, and a document engine must come first.
+hotplug, storage write path, general IPC, networking, USB HID stack, user-space
+display server, or SMP startup. Console, System, Files, and the Applications
+launcher remain kernel-hosted desktop services. App ELF files are validated but
+still embedded in the EFI payload rather than loaded from signed packages. There
+is no web browser: capability IPC, networking, DNS, audited TLS, renderer
+isolation, and a bounded document engine must come first.
 Runtime Services memory is preserved, but the kernel does not call Runtime
 Services after the handoff.
 
@@ -273,6 +277,7 @@ src/console.c   Argus framebuffer terminal + UEFI text fallback
 src/font5x7.c   tiny built-in 5x7 terminal font
 src/cpu.S       CPU instructions, stack switch, and interrupt entry stubs
 src/user_images.S embeds separately linked user images in the EFI payload
+src/elf_loader.c strict bounded ELF64 user-image validation
 user/app_runtime.cpp freestanding syscalls, indexed drawing, font, and number helpers
 user/app.ld     fixed-address image layout and size/storage assertions for all apps
 user/snake.cpp  freestanding persistent C++20 Snake process
@@ -293,6 +298,8 @@ docs/surface-compositor-v0.14.md retained surfaces, compositor, and app boundary
 docs/userspace-v0.15.md ring-3, syscall, address-space, and scheduler boundary
 docs/cpp-snake-v0.16.md C++ image, game ABI, input, rendering, and limits
 docs/user-apps-v0.17.md shared app ABI, launcher, applications, and limits
+docs/process-runtime-v0.19.md ELF lifecycle, fault containment, waits, and preemption
+docs/browser-security-roadmap.md mandatory security gates for Internet browsing
 PRODUCT.md      product intent, personality, anti-references, and principles
 DESIGN.md       normative ArgusOS desktop tokens and component rules
 ```
@@ -454,12 +461,14 @@ Implemented:
 - cooperative round-robin scheduling of two independent user probes
 - boot and shell tests for isolation, scheduling, and successful completion
 
-Remaining after v0.17:
+Completed in v0.19:
 
-- general process lifecycle beyond embedded persistent apps and boot-time probes
-- preemption and timer-driven scheduling
-- ELF loading and dynamic process creation
-- user exception recovery, termination, and general IPC
+- application lifecycle beyond boot-time creation
+- timer-driven preemption and blocking event waits
+- strict ELF loading for the embedded application catalog
+- user exception termination and kernel recovery
+
+General capability IPC remains future work.
 
 This established the first conventional kernel/userspace boundary. Stage M now
 builds a small application runtime on it.
@@ -482,7 +491,7 @@ Implemented:
 - periodic System updates and Files refresh after RAMFS mutation
 - graphical QEMU smoke coverage for dragging, damage, focus, and framebuffer captures
 
-Still implement:
+Completed in v0.19:
 
 - xHCI discovery and USB HID keyboard/mouse input
 - bitmap/font asset loading through the read-only filesystem
@@ -512,7 +521,7 @@ Completed next in v0.17:
 
 Still implement:
 
-- process creation from ELF files rather than embedded flat images
+- process creation from validated ELF images rather than flat text blobs
 - user-space ownership of the compositor and application toolkit
 - preemption, blocking waits, and user-fault termination
 
@@ -533,16 +542,31 @@ Implemented:
 - QEMU interaction and framebuffer coverage for launcher, calculation, text entry,
   and game input
 
+Completed next in v0.19:
+
+- a strict ELF loader, dynamic app instances, and user-fault termination
+- blocking event waits and timer preemption instead of cooperative polling
+
 Still implement:
 
-- an ELF loader, dynamic process creation, and user-fault termination
-- blocking event waits and preemption instead of cooperative polling
 - filesystem capabilities so Notes can save and Files can move to user space
 - sockets, DNS, TLS, and an HTML/text document engine before a browser is credible
 
-The next development step is executable loading plus process lifecycle and fault
-containment. That unlocks apps loaded from disk instead of adding more embedded
-images to the kernel payload.
+### Stage N and O: hardened process runtime, completed in v0.19
+
+Implemented:
+
+- bounded ELF64 program-header validation and permission-aware page mapping
+- dynamic PIDs plus app start, stop, and restart lifecycle operations
+- full ring-3 interrupt-context capture and contained user-fault termination
+- APIC timer preemption proven with a user process that never makes a syscall
+- input or deadline event waits used by all three C++ applications
+- explicit stopped, exited, and faulted window states with no stale app pixels
+- automated boot probes for fault containment, preemption, blocking, and lifecycle
+
+The next platform work is capability-scoped IPC and the network foundation. The
+browser requirements are fixed in `docs/browser-security-roadmap.md`; Internet
+access stays disabled until those security gates are met.
 
 ## Exercises
 

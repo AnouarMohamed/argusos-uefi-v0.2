@@ -45,6 +45,23 @@ static int parse_u64(const char *text, uint64_t *value_out) {
     return 1;
 }
 
+static uint32_t app_id_from_name(const char *name) {
+    if (strings_equal(name, "snake")) return ARGUS_APP_ID_SNAKE;
+    if (strings_equal(name, "calc") || strings_equal(name, "calculator"))
+        return ARGUS_APP_ID_CALCULATOR;
+    if (strings_equal(name, "notes")) return ARGUS_APP_ID_NOTES;
+    return 0;
+}
+
+static const char *process_state_name(argus_process_state_t state) {
+    if (state == ARGUS_PROCESS_READY) return "ready";
+    if (state == ARGUS_PROCESS_RUNNING) return "running";
+    if (state == ARGUS_PROCESS_BLOCKED) return "waiting";
+    if (state == ARGUS_PROCESS_EXITED) return "exited";
+    if (state == ARGUS_PROCESS_FAULTED) return "faulted";
+    return "stopped";
+}
+
 static void print_help(void) {
     kconsole_write("\nKernel commands:\n");
     kconsole_write("  help         command list\n");
@@ -58,6 +75,9 @@ static void print_help(void) {
     kconsole_write("  processes    user process and scheduler state\n");
     kconsole_write("  snake        C++ user game state\n");
     kconsole_write("  userapps     ring-3 application state\n");
+    kconsole_write("  appstart N   start snake, calc, or notes\n");
+    kconsole_write("  appstop N    stop snake, calc, or notes\n");
+    kconsole_write("  apprestart N restart snake, calc, or notes\n");
     kconsole_write("  fs           Rust RAMFS statistics\n");
     kconsole_write("  ls           list RAMFS files\n");
     kconsole_write("  cat PATH     print a RAMFS file\n");
@@ -87,7 +107,7 @@ static void print_status(
     const acpi_info_t *acpi,
     const paging_info_t *paging
 ) {
-    kconsole_write("\nArgusOS kernel v0.17\n");
+    kconsole_write("\nArgusOS kernel v0.19\n");
     kconsole_write("Boot Services: exited\nCPUs: ");
     kconsole_write_dec(acpi->enabled_cpu_count);
     kconsole_write("\nCR3: ");
@@ -159,6 +179,40 @@ static void print_user_apps(void) {
     kconsole_write(process_app_input_count(ARGUS_APP_ID_NOTES)
         ? "\nNOTES_INPUT_OK" : "\nNOTES_INPUT_IDLE");
     kconsole_write("\nAPP_SURFACE_ABI_OK\nUSER_APPS_OK\n");
+}
+
+static void app_lifecycle(const char *name, uint32_t operation) {
+    uint32_t app_id = app_id_from_name(name);
+    if (!app_id) {
+        kconsole_write("usage: appstart, appstop, or apprestart snake|calc|notes\n");
+        return;
+    }
+    int result = operation == 1u ? process_app_start(app_id) :
+        operation == 2u ? process_app_stop(app_id) :
+        process_app_restart(app_id);
+    if (!result) {
+        kconsole_write("APP_LIFECYCLE_FAIL\n");
+        return;
+    }
+    desktop_refresh_apps();
+    argus_process_app_status_t status;
+    if (!process_app_status(app_id, &status)) {
+        kconsole_write("APP_LIFECYCLE_FAIL\n");
+        return;
+    }
+    kconsole_write("App state: ");
+    kconsole_write(process_state_name(status.state));
+    if (status.pid) {
+        kconsole_write("\nPID: ");
+        kconsole_write_dec(status.pid);
+    }
+    if (status.state == ARGUS_PROCESS_FAULTED) {
+        kconsole_write("\nFault vector: ");
+        kconsole_write_dec(status.fault_vector);
+        kconsole_write("\nFault RIP: ");
+        kconsole_write_hex(status.fault_rip);
+    }
+    kconsole_write("\nAPP_LIFECYCLE_OK\n");
 }
 
 static void print_ramfs_error(int32_t status) {
@@ -465,6 +519,14 @@ static void execute_command(
         kconsole_write_dec(process_yield_count());
         kconsole_write("\nContext switches: ");
         kconsole_write_dec(process_context_switch_count());
+        kconsole_write("\nContained faults: ");
+        kconsole_write_dec(process_fault_count());
+        kconsole_write("\nTimer preemptions: ");
+        kconsole_write_dec(process_preemption_count());
+        kconsole_write("\nEvent waits: ");
+        kconsole_write_dec(process_wait_count());
+        kconsole_write("\nEvent wakeups: ");
+        kconsole_write_dec(process_wakeup_count());
         kconsole_write("\nAddress spaces: ");
         kconsole_write(process_address_space_isolated()
             ? "isolated" : "invalid");
@@ -476,6 +538,9 @@ static void execute_command(
     }
     else if (strings_equal(line, "snake")) print_snake_status();
     else if (strings_equal(line, "userapps")) print_user_apps();
+    else if (starts_with(line, "appstart ")) app_lifecycle(line + 9, 1u);
+    else if (starts_with(line, "appstop ")) app_lifecycle(line + 8, 2u);
+    else if (starts_with(line, "apprestart ")) app_lifecycle(line + 11, 3u);
     else if (strings_equal(line, "fs")) print_ramfs_status();
     else if (strings_equal(line, "ls")) list_ramfs();
     else if (starts_with(line, "cat ")) cat_ramfs(line + 4);

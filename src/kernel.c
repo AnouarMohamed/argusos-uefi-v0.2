@@ -82,7 +82,7 @@ void kernel_exception_panic(
 void kernel_main(const boot_info_t *boot_info) {
     kconsole_clear();
 
-    kprint("ArgusOS kernel v0.17\n");
+    kprint("ArgusOS kernel v0.19\n");
     kprint("ARGUS_KERNEL_ONLINE\n");
 
     if (!boot_info || boot_info->magic != ARGUS_BOOT_INFO_MAGIC ||
@@ -236,7 +236,11 @@ void kernel_main(const boot_info_t *boot_info) {
     kprint("USER_RING3_ONLINE\n");
     kprint("SYSCALL_SYSRET_ONLINE\n");
     kprint("USER_ADDRESS_SPACE_ISOLATION_PASS\n");
-    kprint("COOPERATIVE_SCHEDULER_PASS\n");
+    kprint("ELF_LOADER_HARDENING_PASS\n");
+    kprint("USER_FAULT_CONTAINMENT_PASS\n");
+    kprint("TIMER_PREEMPTION_PASS\n");
+    kprint("BLOCKING_EVENT_WAIT_ONLINE\n");
+    kprint("PREEMPTIVE_SCHEDULER_PASS\n");
     kprint("USER_PROCESS_SELF_TEST_PASS\n");
     kprint("CPP_USERSPACE_ONLINE\n");
     kprint("APP_SURFACE_ABI_V1_ONLINE\n");

@@ -223,6 +223,15 @@ surface as Snake. Calculator uses the muted LCD pair only for its result field.
 Notes labels its unsaved state `VOLATILE MEMORY`; it must not imply persistence
 until filesystem access exists.
 
+### Browser Window
+
+The browser is added only after real networking, TLS validation, and renderer
+isolation exist. It uses ordinary square ArgusOS chrome and a compact recessed
+location field. A browser-owned strip always names the canonical host and
+connection state in text; content cannot cover or imitate it. Certificate errors
+replace content with a concise explanation and a back action. Color is never the
+only security signal, and the initial browser has no unsafe proceed action.
+
 ### Focus and Composition
 
 Faded Slate marks the focused title only. Inactive titles use Chrome Shadow.

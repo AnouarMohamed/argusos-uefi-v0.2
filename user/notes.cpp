@@ -3,7 +3,6 @@
 
 namespace {
 
-constexpr uint64_t kNotesPid = 5u;
 constexpr uint32_t kCapacity = 512u;
 constexpr uint32_t kColumns = 48u;
 constexpr uint32_t kRows = 17u;
@@ -63,7 +62,7 @@ private:
 
 extern "C" [[noreturn]] __attribute__((section(".text.start")))
 void argus_user_start(uint64_t pid) {
-    if (pid != kNotesPid || argus::pid() != pid) argus::exit(1u);
+    if (!pid || argus::pid() != pid) argus::exit(1u);
     Notes notes;
     uint32_t sequence = 0u;
     notes.draw();
@@ -75,6 +74,6 @@ void argus_user_start(uint64_t pid) {
             notes.input(key);
         }
         if (notes.dirty()) { notes.draw(); (void)argus::present(++sequence); }
-        argus::yield();
+        argus::wait_for_input();
     }
 }

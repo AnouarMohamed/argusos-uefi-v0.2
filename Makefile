@@ -21,7 +21,7 @@ USER_CXXFLAGS = -target x86_64-none-elf -std=c++20 -ffreestanding \
 OBJS = build/main.obj build/boot.obj build/kernel.obj build/acpi.obj build/ahci.obj build/apic.obj build/block.obj \
        build/arch.obj build/compositor.obj build/desktop.obj build/heap.obj build/input.obj build/kconsole.obj \
        build/kernel_shell.obj build/memory.obj build/module.obj build/paging.obj build/fat32.obj \
-       build/pci.obj build/pmm.obj build/process.obj build/ps2.obj build/serial.obj \
+       build/pci.obj build/pmm.obj build/elf_loader.obj build/process.obj build/ps2.obj build/serial.obj \
        build/ramfs.obj build/surface.obj build/rust_probe.obj build/rust_ramfs.obj build/rust_fat32.obj \
        build/uefi_memory.obj build/cpu.obj build/user_images.obj build/gop.obj build/console.obj build/font5x7.obj
 
@@ -105,7 +105,10 @@ build/pci.obj: src/pci.c src/pci.h | build
 build/pmm.obj: src/pmm.c src/pmm.h src/boot_info.h src/uefi_memory.h src/efi.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-build/process.obj: src/process.c src/process.h src/apic.h src/app_abi.h src/arch.h src/input_keys.h src/paging.h src/pmm.h src/serial.h src/user_abi.h | build
+build/elf_loader.obj: src/elf_loader.c src/elf_loader.h | build
+	$(CLANG) $(CFLAGS) -c $< -o $@
+
+build/process.obj: src/process.c src/process.h src/apic.h src/app_abi.h src/arch.h src/elf_loader.h src/input_keys.h src/paging.h src/pmm.h src/serial.h src/user_abi.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/ps2.obj: src/ps2.c src/ps2.h src/acpi.h src/apic.h src/arch.h src/input_keys.h | build
@@ -156,7 +159,7 @@ build/user_notes.bin: build/user_notes.elf
 	test "$$(wc -c < $@)" -gt 0
 	test "$$(wc -c < $@)" -le 16384
 
-build/user_images.obj: src/user_images.S build/user_snake.bin build/user_calculator.bin build/user_notes.bin | build
+build/user_images.obj: src/user_images.S build/user_snake.elf build/user_calculator.elf build/user_notes.elf | build
 	$(CLANG) -target x86_64-pc-win32-coff -c $< -o $@
 
 build/gop.obj: src/gop.c src/gop.h src/efi.h | build

@@ -1,6 +1,7 @@
 #include "arch.h"
 #include "apic.h"
 #include "kernel.h"
+#include "process.h"
 
 typedef struct __attribute__((packed)) {
     uint16_t limit;
@@ -61,8 +62,10 @@ extern void syscall_entry(void);
 extern uint64_t syscall_kernel_rsp;
 extern void *isr_stub_table[];
 
-_Static_assert(sizeof(arch_user_context_t) == 128u,
+_Static_assert(sizeof(arch_user_context_t) == 144u,
                "user context layout must match syscall assembly");
+_Static_assert(sizeof(interrupt_frame_t) == 176u,
+               "interrupt frame layout must match ISR assembly");
 
 static void set_idt_gate(unsigned vector, void *handler, uint8_t ist) {
     uint64_t address = (uint64_t)(uintptr_t)handler;
@@ -178,15 +181,22 @@ int interrupt_unregister(uint8_t vector, interrupt_handler_t handler) {
     return 1;
 }
 
-void interrupt_dispatch(interrupt_frame_t *frame) {
-    if (frame->vector == ARGUS_APIC_SPURIOUS_VECTOR) return;
+uint64_t interrupt_dispatch(interrupt_frame_t *frame) {
+    if (!frame) return ARCH_USER_ACTION_RETURN;
+    if (frame->vector == ARGUS_APIC_SPURIOUS_VECTOR)
+        return ARCH_USER_ACTION_RETURN;
 
     if (frame->vector < 256u && interrupt_handlers[frame->vector]) {
         interrupt_handlers[frame->vector](frame);
-        return;
+        if ((frame->cs & 3u) == 3u)
+            return process_on_user_interrupt(frame);
+        return ARCH_USER_ACTION_RETURN;
     }
 
     uint64_t fault_address = frame->vector == 14u ? cpu_read_cr2() : 0;
+    if (frame->vector < 32u && (frame->cs & 3u) == 3u)
+        return process_on_user_interrupt(frame);
     kernel_exception_panic(
         frame->vector, frame->error_code, frame->rip, fault_address);
+    return ARCH_USER_ACTION_FAULT;
 }

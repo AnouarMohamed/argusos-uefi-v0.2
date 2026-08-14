@@ -3,7 +3,6 @@
 
 namespace {
 
-constexpr uint64_t kCalculatorPid = 4u;
 constexpr int64_t kLimit = 999999999;
 
 class Calculator {
@@ -120,7 +119,7 @@ private:
 
 extern "C" [[noreturn]] __attribute__((section(".text.start")))
 void argus_user_start(uint64_t pid) {
-    if (pid != kCalculatorPid || argus::pid() != pid) argus::exit(1u);
+    if (!pid || argus::pid() != pid) argus::exit(1u);
     Calculator calculator;
     uint32_t sequence = 0u;
     calculator.draw();
@@ -135,6 +134,6 @@ void argus_user_start(uint64_t pid) {
             calculator.draw();
             (void)argus::present(++sequence);
         }
-        argus::yield();
+        argus::wait_for_input();
     }
 }

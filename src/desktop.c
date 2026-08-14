@@ -438,6 +438,13 @@ static void render_user_app(uint32_t app_index) {
     const uint8_t *source = 0;
     uint32_t sequence = 0;
     if (!process_app_surface(app->user_app_id, &source, &sequence)) {
+        argus_process_app_status_t status;
+        const char *message = "UNAVAILABLE";
+        if (process_app_status(app->user_app_id, &status)) {
+            if (status.state == ARGUS_PROCESS_UNUSED) message = "STOPPED";
+            else if (status.state == ARGUS_PROCESS_FAULTED) message = "FAULTED";
+            else if (status.state == ARGUS_PROCESS_EXITED) message = "EXITED";
+        }
         surface_fill_rect(
             surface,
             x,
@@ -448,11 +455,19 @@ static void render_user_app(uint32_t app_index) {
         );
         surface_draw_text(
             surface,
-            "UNAVAILABLE",
+            message,
             x + 8u,
             y + 8u,
             scale,
             colors.terminal_text
+        );
+        app_sequences[app->user_app_id] = 0;
+        surface_mark_dirty(
+            surface,
+            x,
+            y,
+            content_width(app),
+            content_height(app)
         );
         return;
     }
@@ -839,8 +854,9 @@ void desktop_tick(uint64_t ticks) {
         const uint8_t *pixels;
         uint32_t sequence;
         uint32_t app_id = apps[app_index].user_app_id;
-        if (process_app_surface(app_id, &pixels, &sequence) &&
-            sequence != app_sequences[app_id])
+        int available = process_app_surface(app_id, &pixels, &sequence);
+        if ((available && sequence != app_sequences[app_id]) ||
+            (!available && app_sequences[app_id]))
             app_changed = 1;
     }
     int system_changed = bucket != system_tick_bucket;
@@ -855,8 +871,9 @@ void desktop_tick(uint64_t ticks) {
             const uint8_t *pixels;
             uint32_t sequence;
             uint32_t app_id = apps[app_index].user_app_id;
-            if (process_app_surface(app_id, &pixels, &sequence) &&
-                sequence != app_sequences[app_id])
+            int available = process_app_surface(app_id, &pixels, &sequence);
+            if ((available && sequence != app_sequences[app_id]) ||
+                (!available && app_sequences[app_id]))
                 render_user_app(app_index);
         }
     (void)compositor_present(&compositor);

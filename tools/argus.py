@@ -49,7 +49,11 @@ BOOT_MARKERS = (
     b"USER_RING3_ONLINE",
     b"SYSCALL_SYSRET_ONLINE",
     b"USER_ADDRESS_SPACE_ISOLATION_PASS",
-    b"COOPERATIVE_SCHEDULER_PASS",
+    b"ELF_LOADER_HARDENING_PASS",
+    b"USER_FAULT_CONTAINMENT_PASS",
+    b"TIMER_PREEMPTION_PASS",
+    b"BLOCKING_EVENT_WAIT_ONLINE",
+    b"PREEMPTIVE_SCHEDULER_PASS",
     b"USER_PROCESS_SELF_TEST_PASS",
     b"CPP_USERSPACE_ONLINE",
     b"APP_SURFACE_ABI_V1_ONLINE",
@@ -94,6 +98,9 @@ SHELL_PROBES = (
     (b"fatls\r", b"FAT32_LIST_OK"),
     (b"fatcat /hello.txt\r", b"FAT32_CAT_OK"),
     (b"fatcat /MISSING.TXT\r", b"FAT32 error: not found"),
+    (b"appstop notes\r", b"App state: stopped"),
+    (b"appstart notes\r", b"App state: waiting"),
+    (b"apprestart notes\r", b"APP_LIFECYCLE_OK"),
 )
 FAULT_CASES = {
     "breakpoint": (
