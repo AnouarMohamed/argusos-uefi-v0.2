@@ -1,10 +1,21 @@
 #include "desktop.h"
+#include "apic.h"
+#include "compositor.h"
 #include "console.h"
-#include "font5x7.h"
+#include "fat32.h"
 #include "gop.h"
+#include "heap.h"
+#include "input.h"
+#include "pmm.h"
+#include "ramfs.h"
+#include "surface.h"
 
 #define POINTER_WIDTH 12u
 #define POINTER_HEIGHT 16u
+#define APP_COUNT 3u
+#define APP_CONSOLE 0u
+#define APP_SYSTEM 1u
+#define APP_FILES 2u
 
 typedef struct {
     uint32_t field;
@@ -16,6 +27,13 @@ typedef struct {
     uint32_t title;
     uint32_t ink;
 } desktop_colors_t;
+
+typedef struct {
+    const char *title;
+    const char *task;
+    argus_surface_t surface;
+    uint32_t compositor_id;
+} desktop_app_t;
 
 static const uint16_t pointer_outer[POINTER_HEIGHT] = {
     0x800u, 0xC00u, 0xE00u, 0xF00u,
@@ -32,31 +50,40 @@ static const uint16_t pointer_inner[POINTER_HEIGHT] = {
 };
 
 static desktop_colors_t colors;
+static desktop_app_t apps[APP_COUNT] = {
+    {.title = "KERNEL CONSOLE", .task = "CONSOLE"},
+    {.title = "SYSTEM", .task = "SYSTEM"},
+    {.title = "FILES", .task = "FILES"},
+};
+static argus_surface_t panel_surface;
+static argus_compositor_t compositor;
 static uint32_t scale;
 static uint32_t panel_height;
 static uint32_t title_height;
-static uint32_t window_x;
-static uint32_t window_y;
-static uint32_t window_width;
-static uint32_t window_height;
-static uint32_t terminal_offset_x;
-static uint32_t terminal_offset_y;
-static uint32_t terminal_width;
-static uint32_t terminal_height;
+static uint32_t active_app;
+static uint32_t task_x[APP_COUNT];
+static uint32_t task_width[APP_COUNT];
+static int desktop_online;
+static int dragging;
+static uint32_t dragged_app;
+static uint32_t drag_offset_x;
+static uint32_t drag_offset_y;
+static uint64_t drag_moves;
+static uint64_t system_tick_bucket;
 
 static int pointer_enabled;
 static int pointer_visible;
 static int pointer_initialized;
-static int dragging;
 static uint32_t pointer_x;
 static uint32_t pointer_y;
-static uint32_t drag_offset_x;
-static uint32_t drag_offset_y;
 static uint8_t pointer_buttons;
-static uint64_t drag_moves;
 static uint32_t pointer_saved[POINTER_WIDTH * POINTER_HEIGHT];
 static uint32_t pointer_saved_width;
 static uint32_t pointer_saved_height;
+
+static uint32_t minimum(uint32_t left, uint32_t right) {
+    return left < right ? left : right;
+}
 
 static uint32_t text_width(const char *text, uint32_t text_scale) {
     uint32_t count = 0;
@@ -64,57 +91,12 @@ static uint32_t text_width(const char *text, uint32_t text_scale) {
     return count * 6u * text_scale;
 }
 
-static void draw_glyph(
-    char c,
-    uint32_t x,
-    uint32_t y,
-    uint32_t text_scale,
-    uint32_t color
-) {
-    for (uint32_t row = 0; row < 7u; ++row) {
-        uint8_t bits = font5x7_row(c, row);
-        for (uint32_t col = 0; col < 5u; ++col) {
-            if (bits & (1u << (4u - col)))
-                gop_fill_rect(
-                    x + col * text_scale,
-                    y + row * text_scale,
-                    text_scale,
-                    text_scale,
-                    color
-                );
-        }
+static int strings_equal(const char *left, const char *right) {
+    while (*left && *right && *left == *right) {
+        ++left;
+        ++right;
     }
-}
-
-static void draw_text(
-    const char *text,
-    uint32_t x,
-    uint32_t y,
-    uint32_t text_scale,
-    uint32_t color
-) {
-    while (*text) {
-        draw_glyph(*text++, x, y, text_scale, color);
-        x += 6u * text_scale;
-    }
-}
-
-static void draw_bevel(
-    uint32_t x,
-    uint32_t y,
-    uint32_t width,
-    uint32_t height,
-    uint32_t fill,
-    int raised
-) {
-    if (width < 2u || height < 2u) return;
-    gop_fill_rect(x, y, width, height, fill);
-    uint32_t top_left = raised ? colors.highlight : colors.shadow;
-    uint32_t bottom_right = raised ? colors.shadow : colors.highlight;
-    gop_fill_rect(x, y, width, 1u, top_left);
-    gop_fill_rect(x, y, 1u, height, top_left);
-    gop_fill_rect(x, y + height - 1u, width, 1u, bottom_right);
-    gop_fill_rect(x + width - 1u, y, 1u, height, bottom_right);
+    return *left == 0 && *right == 0;
 }
 
 static void load_colors(void) {
@@ -128,129 +110,433 @@ static void load_colors(void) {
     colors.ink = gop_rgb(0x24, 0x27, 0x24);
 }
 
-static void draw_window(void) {
-    draw_bevel(window_x, window_y, window_width, window_height, colors.chrome, 1);
-    gop_fill_rect(
-        window_x + 3u,
-        window_y + 3u,
-        window_width - 6u,
-        title_height,
-        colors.title
+static void draw_bevel_edges(
+    argus_surface_t *surface,
+    uint32_t x,
+    uint32_t y,
+    uint32_t width,
+    uint32_t height,
+    int raised
+) {
+    if (width < 2u || height < 2u) return;
+    uint32_t top_left = raised ? colors.highlight : colors.shadow;
+    uint32_t bottom_right = raised ? colors.shadow : colors.highlight;
+    surface_fill_rect(surface, x, y, width, 1u, top_left);
+    surface_fill_rect(surface, x, y, 1u, height, top_left);
+    surface_fill_rect(surface, x, y + height - 1u, width, 1u, bottom_right);
+    surface_fill_rect(surface, x + width - 1u, y, 1u, height, bottom_right);
+}
+
+static void draw_bevel(
+    argus_surface_t *surface,
+    uint32_t x,
+    uint32_t y,
+    uint32_t width,
+    uint32_t height,
+    uint32_t fill,
+    int raised
+) {
+    surface_fill_rect(surface, x, y, width, height, fill);
+    draw_bevel_edges(surface, x, y, width, height, raised);
+}
+
+static uint32_t content_x(void) { return 7u; }
+static uint32_t content_y(void) { return title_height + 8u; }
+
+static uint32_t content_width(const desktop_app_t *app) {
+    return app->surface.width - 14u;
+}
+
+static uint32_t content_height(const desktop_app_t *app) {
+    return app->surface.height - title_height - 15u;
+}
+
+static void render_chrome(uint32_t app_index) {
+    desktop_app_t *app = &apps[app_index];
+    argus_surface_t *surface = &app->surface;
+    uint32_t outer_content_y = title_height + 5u;
+    uint32_t outer_content_height = surface->height - title_height - 9u;
+
+    surface_fill_rect(surface, 0u, 0u, surface->width, outer_content_y,
+                      colors.chrome);
+    surface_fill_rect(surface, 0u, outer_content_y, 4u, outer_content_height,
+                      colors.chrome);
+    surface_fill_rect(
+        surface,
+        surface->width - 4u,
+        outer_content_y,
+        4u,
+        outer_content_height,
+        colors.chrome
     );
-    draw_text(
-        "KERNEL CONSOLE",
-        window_x + 7u,
-        window_y + 5u,
+    surface_fill_rect(
+        surface,
+        0u,
+        surface->height - 4u,
+        surface->width,
+        4u,
+        colors.chrome
+    );
+    draw_bevel_edges(surface, 0u, 0u, surface->width, surface->height, 1);
+    draw_bevel_edges(
+        surface,
+        4u,
+        outer_content_y,
+        surface->width - 8u,
+        outer_content_height,
+        0
+    );
+    surface_fill_rect(
+        surface,
+        3u,
+        3u,
+        surface->width - 6u,
+        title_height,
+        app_index == active_app ? colors.title : colors.shadow
+    );
+    surface_draw_text(
+        surface,
+        app->title,
+        7u,
+        5u,
         scale,
         colors.terminal_text
     );
-
-    uint32_t terminal_x = window_x + terminal_offset_x;
-    uint32_t terminal_y = window_y + terminal_offset_y;
-    draw_bevel(
-        terminal_x,
-        terminal_y,
-        terminal_width,
-        terminal_height,
-        colors.terminal,
-        0
-    );
 }
 
-static void draw_panel(const argus_gop_t *g) {
-    uint32_t panel_y = g->height - panel_height;
-    gop_fill_rect(0, panel_y, g->width, panel_height, colors.chrome);
-    gop_fill_rect(0, panel_y, g->width, 1u, colors.highlight);
-    gop_fill_rect(0, g->height - 1u, g->width, 1u, colors.shadow);
-
-    const char *task = "KERNEL CONSOLE";
-    uint32_t task_width = text_width(task, scale) + 16u;
-    uint32_t task_height = panel_height - 8u;
-    draw_bevel(4u, panel_y + 4u, task_width, task_height, colors.chrome, 0);
-    draw_text(
-        task,
-        12u,
-        panel_y + (panel_height - 7u * scale) / 2u,
-        scale,
-        colors.ink
-    );
-}
-
-static int point_in_title(uint32_t x, uint32_t y) {
-    return x >= window_x + 3u && x < window_x + window_width - 3u &&
-           y >= window_y + 3u && y < window_y + 3u + title_height;
-}
-
-static void fill_exposed_window_area(
-    uint32_t old_x,
-    uint32_t old_y,
-    uint32_t new_x,
-    uint32_t new_y
+static uint32_t draw_decimal(
+    argus_surface_t *surface,
+    uint64_t value,
+    uint32_t x,
+    uint32_t y,
+    uint32_t color
 ) {
-    uint32_t old_right = old_x + window_width;
-    uint32_t old_bottom = old_y + window_height;
-    uint32_t new_right = new_x + window_width;
-    uint32_t new_bottom = new_y + window_height;
-    uint32_t overlap_left = old_x > new_x ? old_x : new_x;
-    uint32_t overlap_top = old_y > new_y ? old_y : new_y;
-    uint32_t overlap_right = old_right < new_right ? old_right : new_right;
-    uint32_t overlap_bottom = old_bottom < new_bottom ? old_bottom : new_bottom;
+    char digits[21];
+    unsigned used = 0;
+    if (!value) digits[used++] = '0';
+    while (value) {
+        digits[used++] = (char)('0' + value % 10u);
+        value /= 10u;
+    }
+    char output[21];
+    for (unsigned i = 0; i < used; ++i) output[i] = digits[used - i - 1u];
+    output[used] = 0;
+    surface_draw_text(surface, output, x, y, scale, color);
+    return used;
+}
 
-    if (overlap_left >= overlap_right || overlap_top >= overlap_bottom) {
-        gop_fill_rect(old_x, old_y, window_width, window_height, colors.field);
-        return;
+static void draw_pair(
+    argus_surface_t *surface,
+    const char *label,
+    const char *value,
+    uint32_t y
+) {
+    uint32_t x = content_x() + 8u;
+    uint32_t value_x = x + 12u * 6u * scale;
+    surface_draw_text(surface, label, x, y, scale, colors.terminal_text);
+    surface_draw_text(surface, value, value_x, y, scale, colors.terminal_text);
+}
+
+static void draw_pair_number(
+    argus_surface_t *surface,
+    const char *label,
+    uint64_t value,
+    const char *unit,
+    uint32_t y
+) {
+    uint32_t x = content_x() + 8u;
+    uint32_t value_x = x + 12u * 6u * scale;
+    surface_draw_text(surface, label, x, y, scale, colors.terminal_text);
+    uint32_t digits = draw_decimal(
+        surface,
+        value,
+        value_x,
+        y,
+        colors.terminal_text
+    );
+    if (unit)
+        surface_draw_text(
+            surface,
+            unit,
+            value_x + (digits + 1u) * 6u * scale,
+            y,
+            scale,
+            colors.terminal_text
+        );
+}
+
+static const char *keyboard_state(void) {
+    if (!input_has_keyboard()) return "OFF";
+    return input_keyboard_uses_irq() ? "IRQ" : "POLL";
+}
+
+static const char *pointer_state(void) {
+    if (!input_has_pointer()) return "OFF";
+    return input_pointer_uses_irq() ? "IRQ" : "POLL";
+}
+
+static void render_system(void) {
+    desktop_app_t *app = &apps[APP_SYSTEM];
+    argus_surface_t *surface = &app->surface;
+    uint32_t x = content_x();
+    uint32_t y = content_y();
+    uint32_t width = content_width(app);
+    uint32_t height = content_height(app);
+    surface_fill_rect(surface, x, y, width, height, colors.terminal);
+
+    uint32_t line = 9u * scale;
+    uint32_t row = y + 8u;
+    draw_pair_number(surface, "FREE PAGES", pmm_free_pages(), 0, row);
+    row += line;
+    draw_pair_number(surface, "HEAP USED", heap_used_bytes() / 1024u, "K", row);
+    row += line;
+    draw_pair_number(surface, "HEAP FREE", heap_free_bytes() / 1024u, "K", row);
+    row += line;
+    draw_pair_number(surface, "APIC TICKS", apic_timer_ticks(), 0, row);
+    row += line;
+    draw_pair(surface, "KEYBOARD", keyboard_state(), row);
+    row += line;
+    draw_pair(surface, "POINTER", pointer_state(), row);
+}
+
+static void draw_file_entry(
+    argus_surface_t *surface,
+    const char *path,
+    uint64_t size,
+    const char *kind,
+    uint32_t y
+) {
+    uint32_t x = content_x() + 8u;
+    uint32_t value_x = x + 20u * 6u * scale;
+    surface_draw_text(surface, path, x, y, scale, colors.terminal_text);
+    if (kind)
+        surface_draw_text(surface, kind, value_x, y, scale, colors.terminal_text);
+    else {
+        uint32_t digits = draw_decimal(
+            surface,
+            size,
+            value_x,
+            y,
+            colors.terminal_text
+        );
+        surface_draw_text(
+            surface,
+            "B",
+            value_x + (digits + 1u) * 6u * scale,
+            y,
+            scale,
+            colors.terminal_text
+        );
+    }
+}
+
+static void render_files(void) {
+    desktop_app_t *app = &apps[APP_FILES];
+    argus_surface_t *surface = &app->surface;
+    uint32_t x = content_x();
+    uint32_t y = content_y();
+    uint32_t width = content_width(app);
+    uint32_t height = content_height(app);
+    surface_fill_rect(surface, x, y, width, height, colors.terminal);
+
+    uint32_t line = 9u * scale;
+    uint32_t row = y + 8u;
+    surface_draw_text(surface, "RAMFS", x + 8u, row, scale, colors.terminal_text);
+    row += line;
+    uint64_t ramfs_count = ramfs_file_count();
+    if (ramfs_count > 5u) ramfs_count = 5u;
+    for (uint64_t index = 0; index < ramfs_count; ++index) {
+        char path[ARGUS_RAMFS_MAX_PATH + 1u];
+        uint64_t path_length = 0;
+        uint64_t size = 0;
+        if (ramfs_entry(index, path, sizeof(path), &path_length, &size) !=
+            ARGUS_RAMFS_OK)
+            continue;
+        draw_file_entry(surface, path, size, 0, row);
+        row += line;
+    }
+    if (!ramfs_count) {
+        surface_draw_text(
+            surface,
+            "EMPTY",
+            x + 8u,
+            row,
+            scale,
+            colors.terminal_text
+        );
+        row += line;
     }
 
-    gop_fill_rect(old_x, old_y, window_width, overlap_top - old_y, colors.field);
-    gop_fill_rect(
-        old_x,
-        overlap_bottom,
-        window_width,
-        old_bottom - overlap_bottom,
-        colors.field
+    row += line / 2u;
+    surface_draw_text(surface, "FAT32", x + 8u, row, scale, colors.terminal_text);
+    row += line;
+    int fat_entries = 0;
+    for (uint64_t index = 0; index < 5u; ++index) {
+        char path[ARGUS_FAT32_MAX_PATH + 1u];
+        uint64_t path_length = 0;
+        uint64_t size = 0;
+        uint32_t attributes = 0;
+        int32_t status = fat32_entry(
+            index,
+            path,
+            sizeof(path),
+            &path_length,
+            &size,
+            &attributes
+        );
+        if (status == ARGUS_FAT32_NOT_FOUND) break;
+        if (status != ARGUS_FAT32_OK) continue;
+        draw_file_entry(
+            surface,
+            path,
+            size,
+            attributes & 0x10u ? "DIR" : 0,
+            row
+        );
+        row += line;
+        ++fat_entries;
+    }
+    if (!fat_entries)
+        surface_draw_text(
+            surface,
+            "UNAVAILABLE",
+            x + 8u,
+            row,
+            scale,
+            colors.terminal_text
+        );
+}
+
+static void render_panel(void) {
+    surface_clear(&panel_surface, colors.chrome);
+    surface_fill_rect(
+        &panel_surface,
+        0u,
+        0u,
+        panel_surface.width,
+        1u,
+        colors.highlight
     );
-    gop_fill_rect(
-        old_x,
-        overlap_top,
-        overlap_left - old_x,
-        overlap_bottom - overlap_top,
-        colors.field
+    surface_fill_rect(
+        &panel_surface,
+        0u,
+        panel_surface.height - 1u,
+        panel_surface.width,
+        1u,
+        colors.shadow
     );
-    gop_fill_rect(
-        overlap_right,
-        overlap_top,
-        old_right - overlap_right,
-        overlap_bottom - overlap_top,
-        colors.field
+
+    uint32_t next_x = 4u;
+    uint32_t height = panel_height - 8u;
+    for (uint32_t i = 0; i < APP_COUNT; ++i) {
+        task_x[i] = next_x;
+        task_width[i] = text_width(apps[i].task, scale) + 16u;
+        draw_bevel(
+            &panel_surface,
+            task_x[i],
+            4u,
+            task_width[i],
+            height,
+            colors.chrome,
+            i != active_app
+        );
+        surface_draw_text(
+            &panel_surface,
+            apps[i].task,
+            task_x[i] + 8u,
+            (panel_height - 7u * scale) / 2u,
+            scale,
+            colors.ink
+        );
+        next_x += task_width[i] + 4u;
+    }
+}
+
+static void destroy_surfaces(void) {
+    for (uint32_t i = 0; i < APP_COUNT; ++i)
+        surface_destroy(&apps[i].surface);
+    surface_destroy(&panel_surface);
+}
+
+static int initialize_surfaces(uint32_t width, uint32_t work_height) {
+    uint32_t console_width = width >= 1000u ? 720u : (width * 3u) / 5u;
+    uint32_t console_height = work_height >= 680u ? 560u :
+        (work_height * 3u) / 4u;
+    uint32_t utility_width = width >= 700u ? 400u : width - 24u;
+    uint32_t system_height = minimum(220u, work_height - 24u);
+    uint32_t files_height = minimum(320u, work_height - 24u);
+
+    console_width = minimum(console_width, width - 24u);
+    console_height = minimum(console_height, work_height - 24u);
+    if (console_width < 320u || console_height < 200u ||
+        utility_width < 280u || system_height < 160u || files_height < 200u)
+        return 0;
+
+    if (!surface_init(&apps[APP_CONSOLE].surface, console_width, console_height) ||
+        !surface_init(&apps[APP_SYSTEM].surface, utility_width, system_height) ||
+        !surface_init(&apps[APP_FILES].surface, utility_width, files_height) ||
+        !surface_init(&panel_surface, width, panel_height)) {
+        destroy_surfaces();
+        return 0;
+    }
+    return 1;
+}
+
+static int initialize_compositor(const argus_gop_t *g, uint32_t work_height) {
+    if (!compositor_init(
+            &compositor,
+            g->width,
+            g->height,
+            work_height,
+            colors.field))
+        return 0;
+
+    uint32_t right_margin = g->width >= 700u ? 32u : 12u;
+    uint32_t utility_x = g->width - apps[APP_SYSTEM].surface.width - right_margin;
+    uint32_t console_x = g->width >= 900u ? 40u : 12u;
+    uint32_t console_y = work_height >= 650u ? 96u : 32u;
+    uint32_t system_y = work_height >= 300u ? 40u : 8u;
+    uint32_t files_y = system_y + apps[APP_SYSTEM].surface.height + 24u;
+    if (files_y > work_height - apps[APP_FILES].surface.height)
+        files_y = work_height - apps[APP_FILES].surface.height;
+
+    if (!compositor_add_window(
+            &compositor,
+            &apps[APP_CONSOLE].surface,
+            console_x,
+            console_y,
+            &apps[APP_CONSOLE].compositor_id) ||
+        !compositor_add_window(
+            &compositor,
+            &apps[APP_SYSTEM].surface,
+            utility_x,
+            system_y,
+            &apps[APP_SYSTEM].compositor_id) ||
+        !compositor_add_window(
+            &compositor,
+            &apps[APP_FILES].surface,
+            utility_x,
+            files_y,
+            &apps[APP_FILES].compositor_id) ||
+        !compositor_set_panel(&compositor, &panel_surface, work_height))
+        return 0;
+    return compositor_raise_window(
+        &compositor,
+        apps[APP_CONSOLE].compositor_id
     );
 }
 
-static void move_window(uint32_t new_x, uint32_t new_y) {
-    const argus_gop_t *g = gop_info();
-    uint32_t maximum_x = g->width - window_width;
-    uint32_t maximum_y = g->height - panel_height - window_height;
-    if (new_x > maximum_x) new_x = maximum_x;
-    if (new_y > maximum_y) new_y = maximum_y;
-    if (new_x == window_x && new_y == window_y) return;
-
-    uint32_t old_x = window_x;
-    uint32_t old_y = window_y;
-    if (!gop_move_rect(
-            old_x,
-            old_y,
-            new_x,
-            new_y,
-            window_width,
-            window_height))
-        return;
-    fill_exposed_window_area(old_x, old_y, new_x, new_y);
-    window_x = new_x;
-    window_y = new_y;
-    (void)console_move_region(
-        window_x + terminal_offset_x + 3u,
-        window_y + terminal_offset_y + 3u
+static void activate_app(uint32_t app_index) {
+    if (app_index >= APP_COUNT) return;
+    uint32_t previous = active_app;
+    active_app = app_index;
+    (void)compositor_raise_window(
+        &compositor,
+        apps[app_index].compositor_id
     );
-    ++drag_moves;
+    render_chrome(previous);
+    if (previous != app_index) render_chrome(app_index);
+    render_panel();
 }
 
 static uint32_t clamp_pointer_coordinate(int64_t value, uint32_t maximum) {
@@ -259,60 +545,125 @@ static uint32_t clamp_pointer_coordinate(int64_t value, uint32_t maximum) {
     return (uint32_t)value;
 }
 
-int desktop_redraw(void) {
-    if (!console_uses_framebuffer()) return 0;
+int desktop_init(void) {
+    if (!console_uses_framebuffer() || !surface_self_test()) return 0;
     const argus_gop_t *g = gop_info();
-    if (!g->usable || g->width < 320u || g->height < 200u) return 0;
+    if (!g->usable || g->width < 640u || g->height < 400u) return 0;
 
-    pointer_visible = 0;
-    dragging = 0;
-    pointer_buttons = 0;
+    desktop_online = 0;
     load_colors();
     scale = g->width >= 800u && g->height >= 600u ? 2u : 1u;
     panel_height = scale == 2u ? 32u : 24u;
     title_height = scale == 2u ? 24u : 16u;
-    uint32_t available_height = g->height - panel_height;
-    window_width = (g->width * 3u) / 4u;
-    window_height = (available_height * 3u) / 4u;
-    window_x = (g->width - window_width) / 2u;
-    window_y = (available_height - window_height) / 2u;
-    terminal_offset_x = 4u;
-    terminal_offset_y = title_height + 5u;
-    terminal_width = window_width - 8u;
-    terminal_height = window_height - title_height - 9u;
-
-    gop_fill(colors.field);
-    draw_window();
-    draw_panel(g);
-
-    if (!pointer_initialized) {
-        pointer_x = g->width / 2u;
-        pointer_y = available_height / 2u;
-        pointer_initialized = 1;
-    }
-
-    return console_set_region(
-        window_x + terminal_offset_x + 3u,
-        window_y + terminal_offset_y + 3u,
-        terminal_width - 6u,
-        terminal_height - 6u,
-        0xc9,
-        0xc8,
-        0xb5,
-        0x17,
-        0x1a,
-        0x17
-    );
-}
-
-int desktop_init(void) {
+    uint32_t work_height = g->height - panel_height;
+    active_app = APP_CONSOLE;
     pointer_initialized = 0;
     pointer_enabled = 0;
     pointer_visible = 0;
     dragging = 0;
     pointer_buttons = 0;
     drag_moves = 0;
-    return desktop_redraw();
+    system_tick_bucket = UINT64_MAX;
+
+    if (!initialize_surfaces(g->width, work_height) ||
+        !initialize_compositor(g, work_height)) {
+        destroy_surfaces();
+        return 0;
+    }
+
+    for (uint32_t i = 0; i < APP_COUNT; ++i) {
+        surface_clear(&apps[i].surface, colors.terminal);
+        render_chrome(i);
+    }
+    render_system();
+    render_files();
+    render_panel();
+
+    desktop_app_t *console_app = &apps[APP_CONSOLE];
+    if (!console_set_surface_region(
+            &console_app->surface,
+            content_x(),
+            content_y(),
+            content_width(console_app),
+            content_height(console_app),
+            0xc9,
+            0xc8,
+            0xb5,
+            0x17,
+            0x1a,
+            0x17)) {
+        destroy_surfaces();
+        return 0;
+    }
+
+    compositor_damage_all(&compositor);
+    if (!compositor_validate(&compositor) || !compositor_present(&compositor)) {
+        (void)console_set_region(
+            0u,
+            0u,
+            g->width,
+            g->height,
+            0xc9,
+            0xc8,
+            0xb5,
+            0x17,
+            0x1a,
+            0x17
+        );
+        destroy_surfaces();
+        return 0;
+    }
+    desktop_online = 1;
+    pointer_x = g->width / 2u;
+    pointer_y = work_height / 2u;
+    pointer_initialized = 1;
+    return 1;
+}
+
+int desktop_redraw(void) {
+    if (!desktop_online) return 0;
+    for (uint32_t i = 0; i < APP_COUNT; ++i) render_chrome(i);
+    render_system();
+    render_files();
+    render_panel();
+    compositor_damage_all(&compositor);
+    return compositor_validate(&compositor);
+}
+
+int desktop_present(void) {
+    if (!desktop_online) return 0;
+    desktop_pointer_hide();
+    int result = compositor_present(&compositor);
+    desktop_pointer_show();
+    return result;
+}
+
+void desktop_refresh_apps(void) {
+    if (!desktop_online) return;
+    render_system();
+    render_files();
+}
+
+void desktop_tick(uint64_t ticks) {
+    if (!desktop_online) return;
+    uint64_t bucket = ticks / 100u;
+    if (bucket == system_tick_bucket) return;
+    system_tick_bucket = bucket;
+    desktop_pointer_hide();
+    render_system();
+    (void)compositor_present(&compositor);
+    desktop_pointer_show();
+}
+
+int desktop_focus_app(const char *name) {
+    if (!desktop_online || !name) return 0;
+    uint32_t app_index;
+    if (strings_equal(name, "console")) app_index = APP_CONSOLE;
+    else if (strings_equal(name, "system")) app_index = APP_SYSTEM;
+    else if (strings_equal(name, "files")) app_index = APP_FILES;
+    else return 0;
+    activate_app(app_index);
+    return 1;
 }
 
 void desktop_pointer_set_enabled(int enabled) {
@@ -321,14 +672,12 @@ void desktop_pointer_set_enabled(int enabled) {
 }
 
 void desktop_pointer_show(void) {
-    if (!pointer_enabled || pointer_visible || !console_uses_framebuffer()) return;
+    if (!pointer_enabled || pointer_visible || !pointer_initialized ||
+        !console_uses_framebuffer())
+        return;
     const argus_gop_t *g = gop_info();
-    pointer_saved_width = POINTER_WIDTH;
-    pointer_saved_height = POINTER_HEIGHT;
-    if (pointer_saved_width > g->width - pointer_x)
-        pointer_saved_width = g->width - pointer_x;
-    if (pointer_saved_height > g->height - pointer_y)
-        pointer_saved_height = g->height - pointer_y;
+    pointer_saved_width = minimum(POINTER_WIDTH, g->width - pointer_x);
+    pointer_saved_height = minimum(POINTER_HEIGHT, g->height - pointer_y);
 
     for (uint32_t y = 0; y < pointer_saved_height; ++y) {
         for (uint32_t x = 0; x < pointer_saved_width; ++x) {
@@ -358,25 +707,60 @@ void desktop_pointer_hide(void) {
     pointer_visible = 0;
 }
 
+static int panel_app_at(uint32_t x, uint32_t y, uint32_t *app_index) {
+    if (y < compositor.panel_y || y >= compositor.height) return 0;
+    uint32_t local_y = y - compositor.panel_y;
+    if (local_y < 4u || local_y >= panel_height - 4u) return 0;
+    for (uint32_t i = 0; i < APP_COUNT; ++i) {
+        if (x >= task_x[i] && x < task_x[i] + task_width[i]) {
+            *app_index = i;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 void desktop_pointer_event(int16_t dx, int16_t dy, uint8_t buttons) {
-    if (!pointer_enabled || !console_uses_framebuffer()) return;
+    if (!pointer_enabled || !desktop_online) return;
     const argus_gop_t *g = gop_info();
     desktop_pointer_hide();
-    pointer_x = clamp_pointer_coordinate(
-        (int64_t)pointer_x + dx,
-        g->width - 1u
-    );
-    pointer_y = clamp_pointer_coordinate(
-        (int64_t)pointer_y + dy,
-        g->height - 1u
-    );
+    pointer_x = clamp_pointer_coordinate((int64_t)pointer_x + dx, g->width - 1u);
+    pointer_y = clamp_pointer_coordinate((int64_t)pointer_y + dy, g->height - 1u);
 
     int left_pressed = (buttons & 1u) && !(pointer_buttons & 1u);
-    if (left_pressed && point_in_title(pointer_x, pointer_y)) {
-        dragging = 1;
-        drag_offset_x = pointer_x - window_x;
-        drag_offset_y = pointer_y - window_y;
+    if (left_pressed) {
+        uint32_t app_index;
+        if (panel_app_at(pointer_x, pointer_y, &app_index)) {
+            activate_app(app_index);
+            dragging = 0;
+        } else {
+            uint32_t window_id;
+            uint32_t local_x;
+            uint32_t local_y;
+            if (compositor_window_at(
+                    &compositor,
+                    pointer_x,
+                    pointer_y,
+                    &window_id,
+                    &local_x,
+                    &local_y)) {
+                for (app_index = 0; app_index < APP_COUNT; ++app_index)
+                    if (apps[app_index].compositor_id == window_id) break;
+                if (app_index < APP_COUNT) {
+                    activate_app(app_index);
+                    if (local_x >= 3u &&
+                        local_x < apps[app_index].surface.width - 3u &&
+                        local_y >= 3u && local_y < 3u + title_height) {
+                        dragging = 1;
+                        dragged_app = app_index;
+                        drag_offset_x = local_x;
+                        drag_offset_y = local_y;
+                    }
+                }
+            }
+        }
     }
+
     if (dragging && (buttons & 1u)) {
         uint32_t new_x = pointer_x > drag_offset_x
             ? pointer_x - drag_offset_x
@@ -384,15 +768,36 @@ void desktop_pointer_event(int16_t dx, int16_t dy, uint8_t buttons) {
         uint32_t new_y = pointer_y > drag_offset_y
             ? pointer_y - drag_offset_y
             : 0u;
-        move_window(new_x, new_y);
+        uint32_t window_id = apps[dragged_app].compositor_id;
+        uint32_t old_x = compositor_window_x(&compositor, window_id);
+        uint32_t old_y = compositor_window_y(&compositor, window_id);
+        if (compositor_move_window(&compositor, window_id, new_x, new_y) &&
+            (old_x != compositor_window_x(&compositor, window_id) ||
+             old_y != compositor_window_y(&compositor, window_id)))
+            ++drag_moves;
     }
     if (!(buttons & 1u)) dragging = 0;
     pointer_buttons = buttons;
+    (void)compositor_present(&compositor);
     desktop_pointer_show();
 }
 
 uint64_t desktop_drag_moves(void) { return drag_moves; }
 uint32_t desktop_pointer_x(void) { return pointer_x; }
 uint32_t desktop_pointer_y(void) { return pointer_y; }
-uint32_t desktop_window_x(void) { return window_x; }
-uint32_t desktop_window_y(void) { return window_y; }
+uint32_t desktop_window_x(void) {
+    return compositor_window_x(&compositor, apps[APP_CONSOLE].compositor_id);
+}
+uint32_t desktop_window_y(void) {
+    return compositor_window_y(&compositor, apps[APP_CONSOLE].compositor_id);
+}
+uint32_t desktop_surface_count(void) { return desktop_online ? APP_COUNT : 0u; }
+const char *desktop_active_app(void) {
+    return desktop_online ? apps[active_app].title : "UNAVAILABLE";
+}
+uint64_t desktop_compositor_frames(void) { return compositor.frame_count; }
+uint64_t desktop_damage_pixels(void) { return compositor.damage_pixels; }
+uint32_t desktop_last_damage_count(void) { return compositor.last_damage_count; }
+int desktop_compositor_valid(void) {
+    return desktop_online && compositor_validate(&compositor);
+}

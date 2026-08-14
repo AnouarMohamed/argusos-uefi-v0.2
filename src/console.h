@@ -2,6 +2,7 @@
 #define ARGUS_CONSOLE_H
 
 #include "efi.h"
+#include "surface.h"
 #include <stdint.h>
 
 int console_init(EFI_SYSTEM_TABLE *st);
@@ -24,5 +25,18 @@ int console_set_region(
     uint8_t background_b
 );
 int console_move_region(uint32_t x, uint32_t y);
+int console_set_surface_region(
+    argus_surface_t *surface,
+    uint32_t x,
+    uint32_t y,
+    uint32_t width,
+    uint32_t height,
+    uint8_t foreground_r,
+    uint8_t foreground_g,
+    uint8_t foreground_b,
+    uint8_t background_r,
+    uint8_t background_g,
+    uint8_t background_b
+);
 
 #endif

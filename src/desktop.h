@@ -5,6 +5,10 @@
 
 int desktop_init(void);
 int desktop_redraw(void);
+int desktop_present(void);
+void desktop_refresh_apps(void);
+void desktop_tick(uint64_t ticks);
+int desktop_focus_app(const char *name);
 void desktop_pointer_set_enabled(int enabled);
 void desktop_pointer_show(void);
 void desktop_pointer_hide(void);
@@ -14,5 +18,11 @@ uint32_t desktop_pointer_x(void);
 uint32_t desktop_pointer_y(void);
 uint32_t desktop_window_x(void);
 uint32_t desktop_window_y(void);
+uint32_t desktop_surface_count(void);
+const char *desktop_active_app(void);
+uint64_t desktop_compositor_frames(void);
+uint64_t desktop_damage_pixels(void);
+uint32_t desktop_last_damage_count(void);
+int desktop_compositor_valid(void);
 
 #endif

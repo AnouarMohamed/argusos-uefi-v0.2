@@ -56,3 +56,6 @@ after the drag, and validates the defining palette in both.
 The next UI work should build a small damage-aware compositor and surface API.
 Ring 3, syscalls, and scheduling should then move durable window ownership into a
 C++ user-space display server.
+
+The compositor and retained-surface milestone is completed in v0.14 and
+documented in `docs/surface-compositor-v0.14.md`.

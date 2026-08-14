@@ -10,10 +10,10 @@ RUSTFLAGS = --target $(RUST_TARGET) --crate-type lib --emit=obj \
             -C opt-level=2 -C overflow-checks=yes
 
 OBJS = build/main.obj build/boot.obj build/kernel.obj build/acpi.obj build/ahci.obj build/apic.obj build/block.obj \
-       build/arch.obj build/desktop.obj build/heap.obj build/input.obj build/kconsole.obj \
+       build/arch.obj build/compositor.obj build/desktop.obj build/heap.obj build/input.obj build/kconsole.obj \
        build/kernel_shell.obj build/memory.obj build/module.obj build/paging.obj build/fat32.obj \
        build/pci.obj build/pmm.obj build/ps2.obj build/serial.obj \
-       build/ramfs.obj build/rust_probe.obj build/rust_ramfs.obj build/rust_fat32.obj \
+       build/ramfs.obj build/surface.obj build/rust_probe.obj build/rust_ramfs.obj build/rust_fat32.obj \
        build/uefi_memory.obj build/cpu.obj build/gop.obj build/console.obj build/font5x7.obj
 
 all: build/BOOTX64.EFI
@@ -42,7 +42,10 @@ build/apic.obj: src/apic.c src/apic.h src/acpi.h | build
 build/block.obj: src/block.c src/block.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-build/desktop.obj: src/desktop.c src/desktop.h src/console.h src/font5x7.h src/gop.h | build
+build/compositor.obj: src/compositor.c src/compositor.h src/gop.h src/surface.h | build
+	$(CLANG) $(CFLAGS) -c $< -o $@
+
+build/desktop.obj: src/desktop.c src/desktop.h src/apic.h src/compositor.h src/console.h src/fat32.h src/gop.h src/heap.h src/input.h src/pmm.h src/ramfs.h src/surface.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/arch.obj: src/arch.c src/arch.h src/apic.h src/kernel.h | build
@@ -70,6 +73,9 @@ build/rust_probe.obj: src/rust_probe.rs rust-toolchain.toml | build
 	$(RUSTC) $(RUSTFLAGS) --crate-name argus_rust_probe $< -o $@
 
 build/ramfs.obj: src/ramfs.c src/ramfs.h src/ramfs_abi.h | build
+	$(CLANG) $(CFLAGS) -c $< -o $@
+
+build/surface.obj: src/surface.c src/surface.h src/font5x7.h src/heap.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/rust_ramfs.obj: src/rust_ramfs.rs rust-toolchain.toml | build
@@ -105,7 +111,7 @@ build/cpu.obj: src/cpu.S | build
 build/gop.obj: src/gop.c src/gop.h src/efi.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-build/console.obj: src/console.c src/console.h src/gop.h src/font5x7.h src/efi.h | build
+build/console.obj: src/console.c src/console.h src/gop.h src/font5x7.h src/surface.h src/efi.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/font5x7.obj: src/font5x7.c src/font5x7.h | build

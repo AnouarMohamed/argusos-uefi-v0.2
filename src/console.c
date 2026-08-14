@@ -15,6 +15,7 @@ static uint32_t region_x;
 static uint32_t region_y;
 static uint32_t region_w;
 static uint32_t region_h;
+static argus_surface_t *target_surface;
 
 static const uint8_t palette[16][3] = {
     {0,0,0},       {0,0,170},     {0,170,0},     {0,170,170},
@@ -35,13 +36,26 @@ static void fallback_char(char c) {
 }
 
 static void draw_glyph(char c, uint32_t x, uint32_t y) {
-    gop_fill_rect(x, y, cell_w, cell_h, bg);
+    if (target_surface)
+        surface_fill_rect(target_surface, x, y, cell_w, cell_h, bg);
+    else
+        gop_fill_rect(x, y, cell_w, cell_h, bg);
     for (unsigned row = 0; row < 7; ++row) {
         uint8_t bits = font5x7_row(c, row);
         for (unsigned col = 0; col < 5; ++col) {
             if (bits & (1u << (4u - col))) {
-                gop_fill_rect(x + col * scale, y + row * scale,
-                              scale, scale, fg);
+                if (target_surface)
+                    surface_fill_rect(
+                        target_surface,
+                        x + col * scale,
+                        y + row * scale,
+                        scale,
+                        scale,
+                        fg
+                    );
+                else
+                    gop_fill_rect(x + col * scale, y + row * scale,
+                                  scale, scale, fg);
             }
         }
     }
@@ -53,13 +67,32 @@ static void ensure_cursor_visible(void) {
         cursor_y += cell_h;
     }
     if (cursor_y + cell_h > region_y + region_h) {
-        gop_scroll_rect_up(region_x, region_y, region_w, region_h, cell_h, bg);
+        if (target_surface)
+            surface_scroll_rect_up(
+                target_surface,
+                region_x,
+                region_y,
+                region_w,
+                region_h,
+                cell_h,
+                bg
+            );
+        else
+            gop_scroll_rect_up(
+                region_x,
+                region_y,
+                region_w,
+                region_h,
+                cell_h,
+                bg
+            );
         cursor_y = region_y + region_h - cell_h;
     }
 }
 
 int console_init(EFI_SYSTEM_TABLE *st) {
     fallback_out = st->ConOut;
+    target_surface = 0;
     framebuffer_mode = gop_init(st);
     if (!framebuffer_mode) return 0;
 
@@ -101,7 +134,17 @@ void console_clear(void) {
         if (fallback_out) fallback_out->ClearScreen(fallback_out);
         return;
     }
-    gop_fill_rect(region_x, region_y, region_w, region_h, bg);
+    if (target_surface)
+        surface_fill_rect(
+            target_surface,
+            region_x,
+            region_y,
+            region_w,
+            region_h,
+            bg
+        );
+    else
+        gop_fill_rect(region_x, region_y, region_w, region_h, bg);
 }
 
 void console_putc(char c) {
@@ -125,7 +168,17 @@ void console_putc(char c) {
             cursor_x = region_x + (region_w / cell_w) * cell_w;
             if (cursor_x >= region_x + cell_w) cursor_x -= cell_w;
         }
-        gop_fill_rect(cursor_x, cursor_y, cell_w, cell_h, bg);
+        if (target_surface)
+            surface_fill_rect(
+                target_surface,
+                cursor_x,
+                cursor_y,
+                cell_w,
+                cell_h,
+                bg
+            );
+        else
+            gop_fill_rect(cursor_x, cursor_y, cell_w, cell_h, bg);
         return;
     }
 
@@ -165,6 +218,7 @@ int console_set_region(
         width < cell_w || height < cell_h)
         return 0;
 
+    target_surface = 0;
     region_x = x;
     region_y = y;
     region_w = width - width % cell_w;
@@ -178,9 +232,14 @@ int console_set_region(
 
 int console_move_region(uint32_t x, uint32_t y) {
     if (!framebuffer_mode) return 0;
-    const argus_gop_t *g = gop_info();
-    if (x >= g->width || y >= g->height ||
-        region_w > g->width - x || region_h > g->height - y)
+    uint32_t target_width = target_surface
+        ? target_surface->width
+        : gop_info()->width;
+    uint32_t target_height = target_surface
+        ? target_surface->height
+        : gop_info()->height;
+    if (x >= target_width || y >= target_height ||
+        region_w > target_width - x || region_h > target_height - y)
         return 0;
 
     uint32_t cursor_offset_x = cursor_x - region_x;
@@ -189,5 +248,36 @@ int console_move_region(uint32_t x, uint32_t y) {
     region_y = y;
     cursor_x = region_x + cursor_offset_x;
     cursor_y = region_y + cursor_offset_y;
+    return 1;
+}
+
+int console_set_surface_region(
+    argus_surface_t *surface,
+    uint32_t x,
+    uint32_t y,
+    uint32_t width,
+    uint32_t height,
+    uint8_t foreground_r,
+    uint8_t foreground_g,
+    uint8_t foreground_b,
+    uint8_t background_r,
+    uint8_t background_g,
+    uint8_t background_b
+) {
+    if (!framebuffer_mode || !surface_valid(surface) ||
+        x >= surface->width || y >= surface->height ||
+        width > surface->width - x || height > surface->height - y ||
+        width < cell_w || height < cell_h)
+        return 0;
+
+    target_surface = surface;
+    region_x = x;
+    region_y = y;
+    region_w = width - width % cell_w;
+    region_h = height - height % cell_h;
+    if (region_w < cell_w || region_h < cell_h) return 0;
+    fg = gop_rgb(foreground_r, foreground_g, foreground_b);
+    bg = gop_rgb(background_r, background_g, background_b);
+    console_clear();
     return 1;
 }

@@ -50,6 +50,12 @@ components:
     typography: "{typography.body}"
     rounded: "{rounded.square}"
     padding: "8px"
+  utility-window:
+    backgroundColor: "{colors.terminal-ink}"
+    textColor: "{colors.terminal-text}"
+    typography: "{typography.body}"
+    rounded: "{rounded.square}"
+    padding: "8px"
 ---
 
 # Design System: ArgusOS Desktop
@@ -157,15 +163,28 @@ highlight and one shadow line. Never stack ornamental borders.
 
 ### Navigation
 
-The bottom panel shows running tasks only. It does not contain a launcher or
-status copy until those surfaces are functional. Active items use an inverted
-bevel.
+The bottom panel shows running tasks only. Each item must focus and raise its
+window. It does not contain a launcher or status copy until those surfaces are
+functional. Active items use an inverted bevel.
 
 ### Terminal Window
 
-A single movable terminal is the first real application surface. Its concise
-title names the surface, its contents are real serial-mirrored output, and its
-frame leaves enough field visible for pointer movement and dragging.
+The movable terminal is a retained application surface. Its concise title names
+the surface, its contents are real serial-mirrored output, and its frame leaves
+enough field visible for pointer movement and dragging.
+
+### Utility Windows
+
+System and Files use the same retained surface, title, content inset, focus, and
+dragging rules as the terminal. System displays live allocator, timer, and input
+state. Files displays real RAMFS and FAT32 entries. They do not invent actions or
+status that the kernel cannot provide.
+
+### Focus and Composition
+
+Faded Slate marks the focused title only. Inactive titles use Chrome Shadow.
+Clicking a title or task raises the window. Window movement is immediate and
+uses damage composition without decorative animation.
 
 ## 6. Do's and Don'ts
 
@@ -176,6 +195,7 @@ frame leaves enough field visible for pointer movement and dragging.
 - **Do** name only real surfaces, actions, and system state.
 - **Do** keep the terminal readable with #c9c8b5 on #171a17.
 - **Do** preserve keyboard and serial access for every important action.
+- **Do** use the same focus, dragging, and content-inset behavior for every window.
 
 ### Don't:
 
@@ -184,3 +204,4 @@ frame leaves enough field visible for pointer movement and dragging.
 - **Don't** use neon cyberpunk accents, gradients, glassmorphism, or rounded cards.
 - **Don't** use a colored side stripe on any panel or item.
 - **Don't** animate anything that does not communicate a state change.
+- **Don't** add close, resize, or launch controls before those actions work.

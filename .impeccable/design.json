@@ -24,7 +24,7 @@
       "kind": "button",
       "refersTo": "active-task",
       "description": "A recessed panel entry naming a real running window.",
-      "html": "<button class=\"ds-active-task\">KERNEL CONSOLE</button>",
+      "html": "<button class=\"ds-active-task\">SYSTEM</button>",
       "css": ".ds-active-task { background:#b8b4a5; color:#242724; padding:4px 8px; border:1px solid #d3d0c2; border-top-color:#6e6c64; border-left-color:#6e6c64; border-radius:0; font:700 12px monospace; } .ds-active-task:hover,.ds-active-task:focus-visible { outline:1px solid #4e5869; outline-offset:1px; }"
     },
     {
@@ -34,6 +34,14 @@
       "description": "The movable kernel console inside one-pixel system chrome.",
       "html": "<section class=\"ds-terminal\"><header>KERNEL CONSOLE</header><pre>argus-kernel&gt; _</pre></section>",
       "css": ".ds-terminal { width:420px; border:1px solid #6e6c64; border-top-color:#d3d0c2; border-left-color:#d3d0c2; border-radius:0; background:#b8b4a5; color:#242724; font:14px monospace; padding:2px; } .ds-terminal header { background:#4e5869; color:#c9c8b5; padding:5px 7px; font-weight:700; cursor:move; } .ds-terminal pre { min-height:180px; margin:2px 0 0; padding:8px; background:#171a17; color:#c9c8b5; border:1px solid #6e6c64; } .ds-terminal:focus-within { outline:1px solid #4e5869; outline-offset:1px; }"
+    },
+    {
+      "name": "Utility Window",
+      "kind": "custom",
+      "refersTo": "utility-window",
+      "description": "A retained system surface showing real kernel or filesystem state.",
+      "html": "<section class=\"ds-utility\"><header>SYSTEM</header><pre>FREE PAGES 247532</pre></section>",
+      "css": ".ds-utility { width:320px; border:1px solid #6e6c64; border-top-color:#d3d0c2; border-left-color:#d3d0c2; border-radius:0; background:#b8b4a5; color:#242724; font:14px monospace; padding:2px; } .ds-utility header { background:#4e5869; color:#c9c8b5; padding:5px 7px; font-weight:700; cursor:move; } .ds-utility pre { min-height:120px; margin:2px 0 0; padding:8px; background:#171a17; color:#c9c8b5; border:1px solid #6e6c64; }"
     }
   ],
   "narrative": {
@@ -45,7 +53,7 @@
       { "name": "The Integer Pixel Rule", "body": "Glyphs are scaled only by whole numbers and never smoothed, stretched, or shadowed.", "section": "typography" },
       { "name": "The One-Pixel Bevel Rule", "body": "Every raised or recessed edge uses exactly one highlight and one shadow line. Never stack ornamental borders.", "section": "elevation" }
     ],
-    "dos": ["Do use #4c5148 as the dominant field and #b8b4a5 for system chrome.", "Do use square corners and exact one-pixel highlight/shadow edges.", "Do name only real surfaces, actions, and system state.", "Do keep the terminal readable with #c9c8b5 on #171a17.", "Do preserve keyboard and serial access for every important action."],
-    "donts": ["Don't make ArgusOS a glossy Windows XP clone or a literal imageboard clone.", "Don't use era labels, copied artwork, fake system state, or nonfunctional chrome.", "Don't use neon cyberpunk accents, gradients, glassmorphism, or rounded cards.", "Don't use a colored side stripe on any panel or item.", "Don't animate anything that does not communicate a state change."]
+    "dos": ["Do use #4c5148 as the dominant field and #b8b4a5 for system chrome.", "Do use square corners and exact one-pixel highlight/shadow edges.", "Do name only real surfaces, actions, and system state.", "Do keep the terminal readable with #c9c8b5 on #171a17.", "Do preserve keyboard and serial access for every important action.", "Do use the same focus, dragging, and content-inset behavior for every window."],
+    "donts": ["Don't make ArgusOS a glossy Windows XP clone or a literal imageboard clone.", "Don't use era labels, copied artwork, fake system state, or nonfunctional chrome.", "Don't use neon cyberpunk accents, gradients, glassmorphism, or rounded cards.", "Don't use a colored side stripe on any panel or item.", "Don't animate anything that does not communicate a state change.", "Don't add close, resize, or launch controls before those actions work."]
   }
 }

@@ -81,7 +81,7 @@ void kernel_exception_panic(
 void kernel_main(const boot_info_t *boot_info) {
     kconsole_clear();
 
-    kprint("ArgusOS kernel v0.13\n");
+    kprint("ArgusOS kernel v0.14\n");
     kprint("ARGUS_KERNEL_ONLINE\n");
 
     if (!boot_info || boot_info->magic != ARGUS_BOOT_INFO_MAGIC ||
@@ -141,7 +141,7 @@ void kernel_main(const boot_info_t *boot_info) {
     kprint_hex(paging.stack_guard_page);
     kprint("\nSTACK_GUARD_ONLINE\n");
 
-    if (!heap_init(128u)) panic("kernel heap initialization failed");
+    if (!heap_init(2048u)) panic("kernel heap initialization failed");
     if (!heap_self_test()) panic("kernel heap self-test failed");
     kprint("HEAP_SELF_TEST_PASS\nHeap capacity: ");
     kprint_dec(heap_total_bytes());

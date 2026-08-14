@@ -68,7 +68,9 @@ static void print_help(void) {
     kconsole_write("  ticks        local-APIC timer ticks\n");
     kconsole_write("  input        native input backends\n");
     kconsole_write("  irqtest      confirm IRQ keyboard command delivery\n");
-    kconsole_write("  ui           pointer and window state\n");
+    kconsole_write("  apps         surfaces and active application\n");
+    kconsole_write("  focus NAME   focus console, system, or files\n");
+    kconsole_write("  ui           pointer and compositor state\n");
     kconsole_write("  desktop      redraw the framebuffer desktop\n");
     kconsole_write("  clear        clear framebuffer/terminal\n");
     kconsole_write("  echo TEXT    print text\n");
@@ -81,7 +83,7 @@ static void print_status(
     const acpi_info_t *acpi,
     const paging_info_t *paging
 ) {
-    kconsole_write("\nArgusOS kernel v0.13\n");
+    kconsole_write("\nArgusOS kernel v0.14\n");
     kconsole_write("Boot Services: exited\nCPUs: ");
     kconsole_write_dec(acpi->enabled_cpu_count);
     kconsole_write("\nCR3: ");
@@ -195,13 +197,19 @@ static void write_ramfs(char *arguments) {
     int32_t status = length > ARGUS_RAMFS_MAX_DATA
         ? ARGUS_RAMFS_NO_SPACE
         : ramfs_write(arguments, (const uint8_t *)data, length);
-    if (status == ARGUS_RAMFS_OK) kconsole_write("RAMFS_WRITE_OK\n");
+    if (status == ARGUS_RAMFS_OK) {
+        desktop_refresh_apps();
+        kconsole_write("RAMFS_WRITE_OK\n");
+    }
     else print_ramfs_error(status);
 }
 
 static void remove_ramfs(const char *path) {
     int32_t status = ramfs_remove(path);
-    if (status == ARGUS_RAMFS_OK) kconsole_write("RAMFS_REMOVE_OK\n");
+    if (status == ARGUS_RAMFS_OK) {
+        desktop_refresh_apps();
+        kconsole_write("RAMFS_REMOVE_OK\n");
+    }
     else print_ramfs_error(status);
 }
 
@@ -443,6 +451,19 @@ static void execute_command(
     else if (strings_equal(line, "irqtest"))
         kconsole_write(input_keyboard_uses_irq()
             ? "PS2_IRQ_INPUT_OK\n" : "PS2_IRQ_INPUT_UNAVAILABLE\n");
+    else if (strings_equal(line, "apps")) {
+        kconsole_write("Surfaces: ");
+        kconsole_write_dec(desktop_surface_count());
+        kconsole_write("\nActive app: ");
+        kconsole_write(desktop_active_app());
+        kconsole_write("\nCompositor frames: ");
+        kconsole_write_dec(desktop_compositor_frames());
+        kconsole_write(desktop_compositor_valid()
+            ? "\nCOMPOSITOR_APPS_OK\n" : "\nCOMPOSITOR_INVALID\n");
+    }
+    else if (starts_with(line, "focus "))
+        kconsole_write(desktop_focus_app(line + 6)
+            ? "APP_FOCUS_OK\n" : "usage: focus console|system|files\n");
     else if (strings_equal(line, "ui")) {
         kconsole_write("Pointer: ");
         kconsole_write(input_has_pointer() ? "online" : "unavailable");
@@ -458,6 +479,16 @@ static void execute_command(
         kconsole_write_dec(desktop_drag_moves());
         kconsole_write(desktop_drag_moves()
             ? "\nDESKTOP_DRAG_OK\n" : "\nDESKTOP_POINTER_IDLE\n");
+        kconsole_write("Active app: ");
+        kconsole_write(desktop_active_app());
+        kconsole_write("\nCompositor frames: ");
+        kconsole_write_dec(desktop_compositor_frames());
+        kconsole_write("\nDamage pixels: ");
+        kconsole_write_dec(desktop_damage_pixels());
+        kconsole_write("\nLast damage rects: ");
+        kconsole_write_dec(desktop_last_damage_count());
+        kconsole_write(desktop_compositor_valid() && desktop_damage_pixels()
+            ? "\nCOMPOSITOR_DAMAGE_OK\n" : "\nCOMPOSITOR_DAMAGE_FAIL\n");
     }
     else if (strings_equal(line, "desktop"))
         kconsole_write(desktop_redraw()
@@ -483,6 +514,11 @@ void kernel_shell_run(
     int desktop_online = desktop_init();
     desktop_pointer_set_enabled(desktop_online && input_has_pointer());
     serial_write(desktop_online ? "DESKTOP_UI_ONLINE\n" : "DESKTOP_UI_UNAVAILABLE\n");
+    if (desktop_online) {
+        serial_write("SURFACE_SELF_TEST_PASS\n");
+        serial_write("COMPOSITOR_ONLINE\n");
+        serial_write("DESKTOP_APPS_ONLINE\n");
+    }
     serial_write(input_keyboard_uses_irq()
         ? "PS2_IRQ_ONLINE\n" : "PS2_POLLING_FALLBACK\n");
     if (!input_has_pointer()) serial_write("PS2_MOUSE_UNAVAILABLE\n");
@@ -490,7 +526,7 @@ void kernel_shell_run(
         ? "PS2_MOUSE_IRQ_ONLINE\n" : "PS2_MOUSE_POLLING_FALLBACK\n");
     serial_write("KERNEL_SHELL_READY\n");
     kconsole_write("argus-kernel> ");
-    desktop_pointer_show();
+    (void)desktop_present();
 
     for (;;) {
         int value = input_getc_nonblocking();
@@ -504,6 +540,7 @@ void kernel_shell_run(
                 );
                 continue;
             }
+            desktop_tick(apic_timer_ticks());
             cpu_wait_for_interrupt();
             continue;
         }
@@ -530,6 +567,6 @@ void kernel_shell_run(
             line[used++] = c;
             kconsole_putc(c);
         }
-        desktop_pointer_show();
+        (void)desktop_present();
     }
 }

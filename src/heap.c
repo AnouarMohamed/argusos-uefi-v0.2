@@ -201,15 +201,20 @@ int heap_self_test(void) {
 
     void *exhaustion[256] = {0};
     unsigned allocated = 0;
+    uint64_t exhaustion_size = heap_total_bytes() / 128u;
+    if (exhaustion_size < 2048u) exhaustion_size = 2048u;
     while (allocated < 256u) {
-        exhaustion[allocated] = kmalloc(2048u);
+        exhaustion[allocated] = kmalloc(exhaustion_size);
         if (!exhaustion[allocated]) break;
         ++allocated;
     }
-    valid = allocated != 0 && allocated < 256u && !kmalloc(2048u) && valid;
+    valid = allocated != 0 && allocated < 256u &&
+            !kmalloc(exhaustion_size) && valid;
+    uint64_t replacement_size = exhaustion_size / 4u;
+    if (replacement_size < 512u) replacement_size = 512u;
     for (unsigned i = 0; i < allocated; i += 2) {
         valid = kfree(exhaustion[i]) && valid;
-        exhaustion[i] = kmalloc(512u);
+        exhaustion[i] = kmalloc(replacement_size);
         valid = exhaustion[i] != 0 && valid;
     }
     for (unsigned i = 0; i < allocated; ++i)

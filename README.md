@@ -1,4 +1,4 @@
-# ArgusOS UEFI Study Kernel v0.13
+# ArgusOS UEFI Study Kernel v0.14
 
 A deliberately small x86-64 UEFI bare-metal study kernel.
 
@@ -36,8 +36,8 @@ kernel with framebuffer and direct COM1 output.
   Enter, Backspace, and Tab without firmware services.
 - A post-firmware kernel monitor accepts commands through COM1 or PS/2 while
   rendering to the framebuffer and serial terminal.
-- A restrained ArgusOS desktop frames the real native shell in a clipped,
-  movable terminal window with a software pointer and one-pixel system chrome.
+- A restrained ArgusOS desktop composites retained Console, System, and Files
+  surfaces with focus, z-order, damage tracking, dragging, and a software pointer.
 - Versioned, validated C ABIs host statically linked `no_std` Rust checksum and
   RAMFS components without giving Rust boot, allocator, interrupt, or device ownership.
 - A dependency-free Python host tool creates test media and drives interactive
@@ -66,8 +66,8 @@ xHCI/USB HID driver. Storage currently supports the first 512-byte-sector LBA48
 SATA device on the first discovered AHCI controller, using polling and a one-sector
 DMA bounce buffer. There is no partition-table traversal, AHCI interrupt/NCQ path,
 hotplug, storage write path, scheduler, userspace, networking, USB HID stack,
-general window manager, or SMP startup. The v0.13 desktop is a kernel-mode shell
-with one draggable window, not a display server or application boundary.
+user-space display server, or SMP startup. The v0.14 compositor and utility apps
+remain kernel-hosted prototypes, not process-isolated applications.
 Runtime Services memory is preserved, but the kernel does not call Runtime
 Services after the handoff.
 
@@ -98,9 +98,9 @@ also discovers QEMU's PCI AHCI controller, identifies and reads the SATA boot
 disk through DMA, mounts that disk with the Rust FAT32 parser, and verifies root
 listing, case-insensitive lookup, file reads, and missing-path handling. It now
 boots with a standard VGA device, requires keyboard and mouse IRQ markers, drags
-the console window through injected pointer events, and captures both initial and
-moved framebuffers. It also verifies the defining palette colors. The sparse
-in-memory FAT32 device remains available as a deterministic fallback.
+the console through damage-aware composition, focuses the System app, and captures
+the initial, moved, and focus states. It also verifies the defining palette colors.
+The sparse in-memory FAT32 device remains available as a deterministic fallback.
 
 The media creation, OVMF discovery, serial synchronization, and shell probes are
 implemented by `tools/argus.py` instead of inline CI shell/Expect logic.
@@ -190,6 +190,8 @@ fatcat /HELLO.TXT
 ticks
 input
 irqtest
+apps
+focus system
 ui
 desktop
 clear
@@ -221,7 +223,9 @@ src/ps2.c       IRQ-driven keyboard/mouse decoding, queues, and polling fallback
 src/input.c     unified nonblocking COM1/PS2 input selection
 src/kconsole.c  post-firmware framebuffer/serial console
 src/kernel_shell.c native post-firmware command monitor
-src/desktop.c   restrained desktop, pointer, hit testing, and movable shell window
+src/surface.c   heap-backed retained pixel surfaces, damage bounds, text, and scroll
+src/compositor.c clipped damage composition, window positions, z-order, and hit tests
+src/desktop.c   desktop policy, pointer, task switching, and built-in utility apps
 src/memory.c    freestanding memset/memcpy/memmove primitives
 src/module_abi.h versioned cross-language descriptor and function contract
 src/module.c     C-side module validation, registry, and boot self-test
@@ -247,20 +251,25 @@ docs/fat32-abi-v1.md FAT32 layout, ownership, bounds, and failure contract
 docs/ahci-storage-v0.11.md PCI/AHCI ownership, DMA, limits, and recovery model
 docs/desktop-ui-v0.12.md first desktop slice, renderer boundary, and limitations
 docs/pointer-ui-v0.13.md PS/2 mouse, cursor, hit testing, and dragging boundary
+docs/surface-compositor-v0.14.md retained surfaces, compositor, and app boundary
 PRODUCT.md      product intent, personality, anti-references, and principles
 DESIGN.md       normative ArgusOS desktop tokens and component rules
 ```
 
 ## Language policy
 
-- C owns kernel integration, allocators, consoles, and early drivers.
+- C owns kernel integration, allocators, consoles, early drivers, and the current
+  kernel-hosted compositor because those paths directly control memory and hardware.
 - x86-64 assembly is limited to instructions and transitions C cannot express safely.
 - Make coordinates the host build while Python owns stateful test orchestration.
 - Python owns image construction and QEMU test orchestration on the host; it is
   not part of the boot image.
 - Rust is restricted to bounded `no_std` components behind documented C ABIs.
   It currently owns a stateless checksum and the fixed-capacity RAMFS path/file
-  state machine plus the read-only FAT32 parser, with no allocator or hardware access.
+  state machine plus the read-only FAT32 parser used by the Files app, with no
+  allocator or hardware access.
+- C++ is reserved for the first user-space display server and application toolkit,
+  targeted for v0.16 after the v0.15 ring-3, syscall, scheduling, and loader work.
 - Boot, page tables, allocators, interrupt control, and device ownership remain
   in C and x86-64 assembly until a later ABI explicitly and safely exposes them.
 - Do not add languages merely by subsystem count: every language adds a
@@ -390,7 +399,7 @@ Recommended next order:
 4. NVMe read-only block backend
 5. a write/cache layer only after power-loss and corruption semantics are designed
 
-### Stage J — processes
+### Stage J — processes, targeted for v0.15
 Implement:
 
 - ring 3
@@ -401,35 +410,38 @@ Implement:
 
 At that point ArgusOS is becoming a conventional kernel rather than a firmware monitor.
 
-### Stage K — continued in v0.13: input and UI groundwork
+### Stage K — continued in v0.14: retained surfaces and utility apps
 
 Implemented:
 
 - a restrained ArgusOS desktop with square one-pixel chrome and no decorative copy
-- a kernel-mode desktop, bottom task panel, and one movable terminal window
+- a kernel-mode desktop and functional bottom task switcher
 - clipped rectangular framebuffer scrolling for terminal viewports
 - a region-aware framebuffer console whose `clear` operation preserves chrome
 - a `desktop` shell command for deterministic redraws
 - PS/2 auxiliary-port setup, three-byte packet decoding, and an IRQ12 event queue
 - a background-preserving software pointer with button state
 - title-bar hit testing and pixel-preserving drag movement
-- graphical QEMU smoke coverage with automated pointer injection and framebuffer captures
+- heap-backed retained pixel surfaces with clipped drawing and scroll operations
+- a damage-aware compositor with z-order, focus, hit testing, and bounded damage lists
+- Console, System, and Files surfaces backed by real kernel and filesystem state
+- periodic System updates and Files refresh after RAMFS mutation
+- graphical QEMU smoke coverage for dragging, damage, focus, and framebuffer captures
 
 Still implement:
 
 - xHCI discovery and USB HID keyboard/mouse input
-- general surface clipping, compositing, damage tracking, and a framebuffer blitter
 - bitmap/font asset loading through the read-only filesystem
 - a minimal user-space display-server protocol
 
-The v0.13 desktop proves pointer input and window movement before those deeper
-boundaries exist. It remains one kernel-owned scene rather than a general window
-manager.
+The v0.14 desktop proves the surface contract and interaction model before process
+isolation exists. The apps are intentionally small and honest, but still execute
+inside the kernel.
 
-### Stage L — C++ windowed UI
+### Stage L — C++ windowed UI, targeted for v0.16
 
 C++ enters the build here, after userspace, syscalls, scheduling, input, and file
-loading exist. It will turn the v0.13 visual prototype into a user-space window
+loading exist. It will turn the v0.14 compositor prototype into a user-space window
 server with a retained widget tree, layout, controls, and applications. Kernel
 drivers and ownership boundaries stay in C; format parsers and other bounded data
 components may remain Rust. The first durable milestone is a real client terminal
@@ -456,5 +468,6 @@ and no longer uses Boot Services. Guard pages and an IST-backed double-fault pat
 contain early stack failures, while a volatile Rust RAMFS supplies the first file
 namespace and a read-only Rust parser consumes sectors from the first block-device
 contract. It is a real kernel boundary, while still being far from a
-general-purpose OS. Its graphical desktop now has a pointer and one draggable
-kernel-owned window, but it is not yet an interactive multi-process GUI.
+general-purpose OS. Its graphical desktop now has retained surfaces, three
+kernel-hosted utility apps, focus, z-order, and damage-aware movement, but it is
+not yet an interactive multi-process GUI.

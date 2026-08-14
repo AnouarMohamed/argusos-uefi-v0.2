@@ -45,6 +45,8 @@ jobs:
         run: |
           test -s build/BOOTX64.EFI
           test -s build/desktop.obj
+          test -s build/compositor.obj
+          test -s build/surface.obj
           test -s build/pci.obj
           test -s build/ahci.obj
           test -s build/rust_probe.obj
@@ -114,7 +116,7 @@ jobs:
 
       - name: Validate smoke-test transcript
         run: |
-          grep -Fq "ArgusOS UEFI Study Monitor v0.13" qemu.log
+          grep -Fq "ArgusOS UEFI Study Monitor v0.14" qemu.log
           grep -Fq "ARGUS_KERNEL_ONLINE" qemu.log
           grep -Fq "BOOT_SERVICES_EXITED" qemu.log
           grep -Fq "PMM_SELF_TEST_PASS" qemu.log
@@ -139,11 +141,18 @@ jobs:
           grep -Fq "DOUBLE_FAULT_IST_ONLINE" qemu.log
           grep -Fq "APIC_TIMER_TICK" qemu.log
           grep -Fq "DESKTOP_UI_ONLINE" qemu.log
+          grep -Fq "SURFACE_SELF_TEST_PASS" qemu.log
+          grep -Fq "COMPOSITOR_ONLINE" qemu.log
+          grep -Fq "DESKTOP_APPS_ONLINE" qemu.log
           grep -Fq "DESKTOP_UI_REDRAWN" qemu.log
           grep -Fq "PS2_IRQ_ONLINE" qemu.log
           grep -Fq "PS2_MOUSE_IRQ_ONLINE" qemu.log
           grep -Fq "PS2_IRQ_INPUT_OK" qemu.log
           grep -Fq "DESKTOP_DRAG_OK" qemu.log
+          grep -Fq "COMPOSITOR_DAMAGE_OK" qemu.log
+          grep -Fq "COMPOSITOR_APPS_OK" qemu.log
+          grep -Fq "APP_FOCUS_OK" qemu.log
+          grep -Fq "Active app: SYSTEM" qemu.log
           grep -Fq "KERNEL_SHELL_READY" qemu.log
           grep -Fq "STATUS_OK" qemu.log
           grep -Fq "MODULES_OK" qemu.log
@@ -167,16 +176,19 @@ jobs:
           grep -Fq "FAT32 error: not found" qemu.log
           test -s build/qemu-desktop.ppm
           test -s build/qemu-desktop-dragged.ppm
+          test -s build/qemu-desktop-apps.ppm
           file build/qemu-desktop.ppm
           file build/qemu-desktop-dragged.ppm
+          file build/qemu-desktop-apps.ppm
 
-      - name: Upload desktop capture
+      - name: Upload desktop captures
         uses: actions/upload-artifact@v4
         with:
           name: argusos-desktop-framebuffer
           path: |
             build/qemu-desktop.ppm
             build/qemu-desktop-dragged.ppm
+            build/qemu-desktop-apps.ppm
           if-no-files-found: error
 
       - name: Require protected fault paths

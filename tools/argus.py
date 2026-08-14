@@ -45,6 +45,9 @@ BOOT_MARKERS = (
     b"DOUBLE_FAULT_IST_ONLINE",
     b"APIC_TIMER_TICK",
     b"DESKTOP_UI_ONLINE",
+    b"SURFACE_SELF_TEST_PASS",
+    b"COMPOSITOR_ONLINE",
+    b"DESKTOP_APPS_ONLINE",
     b"PS2_IRQ_ONLINE",
     b"PS2_MOUSE_IRQ_ONLINE",
     b"KERNEL_SHELL_READY",
@@ -52,6 +55,8 @@ BOOT_MARKERS = (
 SHELL_PROBES = (
     (b"status\r", b"STATUS_OK"),
     (b"desktop\r", b"DESKTOP_UI_REDRAWN"),
+    (b"apps\r", b"COMPOSITOR_APPS_OK"),
+    (b"focus files\r", b"APP_FOCUS_OK"),
     (b"modules\r", b"MODULES_OK"),
     (b"alloc 4096\r", b"ALLOC_OK"),
     (b"memtest\r", b"ALLOCATOR_HARDENING_PASS"),
@@ -411,12 +416,13 @@ def run_smoke(args: argparse.Namespace) -> None:
         time.sleep(0.05)
         qmp.pointer_button("left", True)
         time.sleep(0.05)
-        qmp.move_pointer(120, 60)
+        qmp.move_pointer(80, 60)
         time.sleep(0.05)
         qmp.pointer_button("left", False)
         time.sleep(0.05)
         session.send(b"ui\r")
         session.expect(b"DESKTOP_DRAG_OK", args.timeout)
+        session.expect(b"COMPOSITOR_DAMAGE_OK", args.timeout)
         session.expect(b"argus-kernel> ", args.timeout)
 
         args.drag_screenshot.parent.mkdir(parents=True, exist_ok=True)
@@ -424,6 +430,23 @@ def run_smoke(args: argparse.Namespace) -> None:
         if not args.drag_screenshot.is_file():
             raise ToolError("QEMU did not create the dragged-window screenshot")
         verify_desktop_capture(args.drag_screenshot)
+
+        qmp.move_pointer(180, -110)
+        time.sleep(0.05)
+        qmp.pointer_button("left", True)
+        time.sleep(0.05)
+        qmp.pointer_button("left", False)
+        time.sleep(0.05)
+        session.send(b"apps\r")
+        session.expect(b"Active app: SYSTEM", args.timeout)
+        session.expect(b"COMPOSITOR_APPS_OK", args.timeout)
+        session.expect(b"argus-kernel> ", args.timeout)
+
+        args.apps_screenshot.parent.mkdir(parents=True, exist_ok=True)
+        qmp.execute("screendump", {"filename": str(args.apps_screenshot.resolve())})
+        if not args.apps_screenshot.is_file():
+            raise ToolError("QEMU did not create the focused-app screenshot")
+        verify_desktop_capture(args.apps_screenshot)
     finally:
         try:
             if qmp is not None:
@@ -437,7 +460,8 @@ def run_smoke(args: argparse.Namespace) -> None:
 
     print(
         f"\nArgusOS smoke test passed; transcript: {args.log}; "
-        f"framebuffer: {args.screenshot}; dragged: {args.drag_screenshot}"
+        f"framebuffer: {args.screenshot}; dragged: {args.drag_screenshot}; "
+        f"apps: {args.apps_screenshot}"
     )
 
 
@@ -497,6 +521,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("build/qemu-desktop-dragged.ppm"),
         help="framebuffer capture after the pointer drag probe",
+    )
+    smoke.add_argument(
+        "--apps-screenshot",
+        type=Path,
+        default=Path("build/qemu-desktop-apps.ppm"),
+        help="framebuffer capture after focusing a utility app",
     )
     smoke.add_argument("--qemu", default="qemu-system-x86_64")
     smoke.add_argument("--ovmf-code", type=Path)
