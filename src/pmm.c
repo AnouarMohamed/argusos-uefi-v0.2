@@ -109,24 +109,46 @@ int pmm_init(const boot_info_t *boot_info) {
 }
 
 uint64_t pmm_alloc_page(void) {
+    return pmm_alloc_pages(1);
+}
+
+uint64_t pmm_alloc_pages(uint64_t count) {
+    if (!count || count > free_count) return 0;
+    uint64_t run_start = 0;
+    uint64_t run_length = 0;
+
     for (uint64_t page = 0; page < page_count; ++page) {
         if (bit_get(usable_bitmap, page) && !bit_get(used_bitmap, page)) {
-            bit_set(used_bitmap, page);
-            --free_count;
-            return page * ARGUS_PAGE_SIZE;
+            if (!run_length) run_start = page;
+            ++run_length;
+            if (run_length != count) continue;
+
+            for (uint64_t selected = run_start; selected < run_start + count; ++selected)
+                bit_set(used_bitmap, selected);
+            free_count -= count;
+            return run_start * ARGUS_PAGE_SIZE;
+        } else {
+            run_length = 0;
         }
     }
     return 0;
 }
 
 int pmm_free_page(uint64_t address) {
+    return pmm_release_pages(address, 1);
+}
+
+int pmm_release_pages(uint64_t address, uint64_t count) {
     if ((address & (ARGUS_PAGE_SIZE - 1u)) != 0) return 0;
-    uint64_t page = address / ARGUS_PAGE_SIZE;
-    if (page >= page_count || !bit_get(usable_bitmap, page) ||
-        !bit_get(used_bitmap, page))
+    uint64_t first = address / ARGUS_PAGE_SIZE;
+    if (!count || first >= page_count || count > page_count - first)
         return 0;
-    bit_clear(used_bitmap, page);
-    ++free_count;
+
+    for (uint64_t page = first; page < first + count; ++page)
+        if (!bit_get(usable_bitmap, page) || !bit_get(used_bitmap, page)) return 0;
+    for (uint64_t page = first; page < first + count; ++page)
+        bit_clear(used_bitmap, page);
+    free_count += count;
     return 1;
 }
 

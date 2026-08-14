@@ -26,8 +26,12 @@ typedef struct {
     uint64_t rflags;
 } interrupt_frame_t;
 
+typedef void (*interrupt_handler_t)(interrupt_frame_t *frame);
+
 void arch_init(void);
 void arch_enable_interrupts(void);
+int interrupt_register(uint8_t vector, interrupt_handler_t handler);
+int interrupt_unregister(uint8_t vector, interrupt_handler_t handler);
 void interrupt_dispatch(interrupt_frame_t *frame);
 
 #endif

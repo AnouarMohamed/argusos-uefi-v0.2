@@ -19,6 +19,7 @@ typedef struct __attribute__((packed)) {
 
 static uint64_t gdt[3];
 static idt_gate_t idt[256];
+static interrupt_handler_t interrupt_handlers[256];
 
 extern void arch_load_gdt(const descriptor_table_pointer_t *pointer);
 extern void arch_load_idt(const descriptor_table_pointer_t *pointer);
@@ -48,6 +49,7 @@ void arch_init(void) {
     arch_load_gdt(&gdtr);
 
     for (unsigned i = 0; i < 256; ++i) {
+        interrupt_handlers[i] = 0;
         idt[i].offset_low = 0;
         idt[i].selector = 0;
         idt[i].ist = 0;
@@ -72,12 +74,25 @@ void arch_init(void) {
     cpu_out8(0xA1u, 0xFFu);
 }
 
+int interrupt_register(uint8_t vector, interrupt_handler_t handler) {
+    if (vector < 32u || !handler || interrupt_handlers[vector]) return 0;
+    interrupt_handlers[vector] = handler;
+    return 1;
+}
+
+int interrupt_unregister(uint8_t vector, interrupt_handler_t handler) {
+    if (!handler || interrupt_handlers[vector] != handler) return 0;
+    interrupt_handlers[vector] = 0;
+    return 1;
+}
+
 void interrupt_dispatch(interrupt_frame_t *frame) {
-    if (frame->vector == ARGUS_APIC_TIMER_VECTOR) {
-        apic_timer_interrupt();
+    if (frame->vector == ARGUS_APIC_SPURIOUS_VECTOR) return;
+
+    if (frame->vector < 256u && interrupt_handlers[frame->vector]) {
+        interrupt_handlers[frame->vector](frame);
         return;
     }
-    if (frame->vector == ARGUS_APIC_SPURIOUS_VECTOR) return;
 
     uint64_t fault_address = frame->vector == 14u ? cpu_read_cr2() : 0;
     kernel_exception_panic(

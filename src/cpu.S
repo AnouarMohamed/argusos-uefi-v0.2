@@ -72,6 +72,11 @@ cpu_pause:
     pause
     ret
 
+.globl cpu_wait_for_interrupt
+cpu_wait_for_interrupt:
+    hlt
+    ret
+
 .globl cpu_trigger_breakpoint
 cpu_trigger_breakpoint:
     int3

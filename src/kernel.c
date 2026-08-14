@@ -2,21 +2,21 @@
 #include "acpi.h"
 #include "apic.h"
 #include "arch.h"
-#include "console.h"
+#include "heap.h"
+#include "kconsole.h"
+#include "kernel_shell.h"
 #include "paging.h"
 #include "pmm.h"
-#include "serial.h"
 
 extern void cpu_pause(void);
 extern void cpu_trigger_breakpoint(void);
 
 static void kputc(char c) {
-    if (console_uses_framebuffer()) console_putc(c);
-    serial_putc(c);
+    kconsole_putc(c);
 }
 
 static void kprint(const char *s) {
-    while (*s) kputc(*s++);
+    kconsole_write(s);
 }
 
 static void kprint_dec(uint64_t value) {
@@ -66,7 +66,7 @@ void kernel_exception_panic(
 
 static int allocator_self_test(void) {
     uint64_t before = pmm_free_pages();
-    if (before < 3u) return 0;
+    if (before < 7u) return 0;
 
     uint64_t a = pmm_alloc_page();
     uint64_t b = pmm_alloc_page();
@@ -77,13 +77,18 @@ static int allocator_self_test(void) {
     if (a) valid = pmm_free_page(a) && valid;
     if (b) valid = pmm_free_page(b) && valid;
     if (c) valid = pmm_free_page(c) && valid;
+    if (!valid || pmm_free_pages() != before) return 0;
+
+    uint64_t run = pmm_alloc_pages(4);
+    valid = run && pmm_free_pages() == before - 4u;
+    if (run) valid = pmm_release_pages(run, 4) && valid;
     return valid && pmm_free_pages() == before;
 }
 
 void kernel_main(const boot_info_t *boot_info) {
-    if (console_uses_framebuffer()) console_clear();
+    kconsole_clear();
 
-    kprint("ArgusOS kernel v0.5\n");
+    kprint("ArgusOS kernel v0.6\n");
     kprint("ARGUS_KERNEL_ONLINE\n");
 
     if (!boot_info || boot_info->magic != ARGUS_BOOT_INFO_MAGIC ||
@@ -138,6 +143,12 @@ void kernel_main(const boot_info_t *boot_info) {
     kprint("\nNX: ");
     kprint(paging.nx_enabled ? "enabled\n" : "unavailable\n");
 
+    if (!heap_init(128u)) panic("kernel heap initialization failed");
+    if (!heap_self_test()) panic("kernel heap self-test failed");
+    kprint("HEAP_SELF_TEST_PASS\nHeap capacity: ");
+    kprint_dec(heap_total_bytes());
+    kprint(" bytes\n");
+
     arch_init();
     kprint("GDT_IDT_ONLINE\n");
     if (boot_info->exception_self_test) {
@@ -154,7 +165,6 @@ void kernel_main(const boot_info_t *boot_info) {
     if (!apic_timer_ticks()) panic("local APIC timer did not fire");
     kprint("APIC_TIMER_TICK\n");
 
-    kprint("Argus-owned stack active. Kernel idle.\n");
-    kprint("KERNEL_IDLE\n");
-    cpu_halt_forever();
+    kprint("Argus-owned stack active. Entering native kernel shell.\n");
+    kernel_shell_run(boot_info, &acpi, &paging);
 }

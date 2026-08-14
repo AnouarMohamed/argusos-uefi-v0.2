@@ -1,4 +1,5 @@
 #include "apic.h"
+#include "arch.h"
 
 #define IA32_APIC_BASE_MSR 0x1Bu
 #define APIC_ENABLE (1ULL << 11)
@@ -18,6 +19,11 @@ static volatile uint32_t *lapic;
 static int x2apic_mode;
 static volatile uint64_t timer_ticks;
 
+static void timer_handler(interrupt_frame_t *frame) {
+    (void)frame;
+    apic_timer_interrupt();
+}
+
 static uint32_t apic_read(uint32_t offset) {
     if (x2apic_mode)
         return (uint32_t)cpu_rdmsr(0x800u + offset / 16u);
@@ -33,6 +39,7 @@ static void apic_write(uint32_t offset, uint32_t value) {
 
 int apic_init(const acpi_info_t *acpi) {
     if (!acpi || !acpi->local_apic_address) return 0;
+    if (!interrupt_register(ARGUS_APIC_TIMER_VECTOR, timer_handler)) return 0;
 
     uint64_t apic_base = cpu_rdmsr(IA32_APIC_BASE_MSR);
     x2apic_mode = (apic_base & APIC_X2_MODE) != 0;

@@ -4,7 +4,8 @@ CFLAGS = -target x86_64-pc-win32-coff -ffreestanding -fshort-wchar -mno-red-zone
          -fno-stack-protector -fno-builtin -Wall -Wextra -O2
 
 OBJS = build/main.obj build/boot.obj build/kernel.obj build/acpi.obj build/apic.obj \
-       build/arch.obj build/paging.obj build/pmm.obj build/serial.obj \
+       build/arch.obj build/heap.obj build/input.obj build/kconsole.obj \
+       build/kernel_shell.obj build/paging.obj build/pmm.obj build/ps2.obj build/serial.obj \
        build/uefi_memory.obj build/cpu.obj build/gop.obj build/console.obj build/font5x7.obj
 
 all: build/BOOTX64.EFI
@@ -18,7 +19,7 @@ build/main.obj: src/main.c src/efi.h src/boot.h src/console.h src/gop.h src/uefi
 build/boot.obj: src/boot.c src/boot.h src/boot_info.h src/efi.h src/console.h src/gop.h src/kernel.h src/serial.h src/uefi_memory.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-build/kernel.obj: src/kernel.c src/kernel.h src/acpi.h src/apic.h src/arch.h src/boot_info.h src/console.h src/paging.h src/pmm.h src/serial.h | build
+build/kernel.obj: src/kernel.c src/kernel.h src/acpi.h src/apic.h src/arch.h src/boot_info.h src/heap.h src/kconsole.h src/kernel_shell.h src/paging.h src/pmm.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/acpi.obj: src/acpi.c src/acpi.h src/boot_info.h | build
@@ -30,10 +31,25 @@ build/apic.obj: src/apic.c src/apic.h src/acpi.h | build
 build/arch.obj: src/arch.c src/arch.h src/apic.h src/kernel.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
+build/heap.obj: src/heap.c src/heap.h src/pmm.h | build
+	$(CLANG) $(CFLAGS) -c $< -o $@
+
+build/input.obj: src/input.c src/input.h src/ps2.h src/serial.h | build
+	$(CLANG) $(CFLAGS) -c $< -o $@
+
+build/kconsole.obj: src/kconsole.c src/kconsole.h src/console.h src/serial.h | build
+	$(CLANG) $(CFLAGS) -c $< -o $@
+
+build/kernel_shell.obj: src/kernel_shell.c src/kernel_shell.h src/acpi.h src/apic.h src/boot_info.h src/heap.h src/input.h src/kconsole.h src/paging.h src/pmm.h | build
+	$(CLANG) $(CFLAGS) -c $< -o $@
+
 build/paging.obj: src/paging.c src/paging.h src/acpi.h src/boot_info.h src/pmm.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/pmm.obj: src/pmm.c src/pmm.h src/boot_info.h src/uefi_memory.h src/efi.h | build
+	$(CLANG) $(CFLAGS) -c $< -o $@
+
+build/ps2.obj: src/ps2.c src/ps2.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/serial.obj: src/serial.c src/serial.h | build
