@@ -7,15 +7,17 @@
 #include "heap.h"
 #include "input.h"
 #include "pmm.h"
+#include "process.h"
 #include "ramfs.h"
 #include "surface.h"
 
 #define POINTER_WIDTH 12u
 #define POINTER_HEIGHT 16u
-#define APP_COUNT 3u
+#define APP_COUNT 4u
 #define APP_CONSOLE 0u
 #define APP_SYSTEM 1u
 #define APP_FILES 2u
+#define APP_SNAKE 3u
 
 typedef struct {
     uint32_t field;
@@ -26,6 +28,8 @@ typedef struct {
     uint32_t terminal_text;
     uint32_t title;
     uint32_t ink;
+    uint32_t game_field;
+    uint32_t game_ink;
 } desktop_colors_t;
 
 typedef struct {
@@ -54,6 +58,7 @@ static desktop_app_t apps[APP_COUNT] = {
     {.title = "KERNEL CONSOLE", .task = "CONSOLE"},
     {.title = "SYSTEM", .task = "SYSTEM"},
     {.title = "FILES", .task = "FILES"},
+    {.title = "SNAKE", .task = "SNAKE"},
 };
 static argus_surface_t panel_surface;
 static argus_compositor_t compositor;
@@ -70,6 +75,7 @@ static uint32_t drag_offset_x;
 static uint32_t drag_offset_y;
 static uint64_t drag_moves;
 static uint64_t system_tick_bucket;
+static uint32_t snake_sequence;
 
 static int pointer_enabled;
 static int pointer_visible;
@@ -108,6 +114,8 @@ static void load_colors(void) {
     colors.terminal_text = gop_rgb(0xc9, 0xc8, 0xb5);
     colors.title = gop_rgb(0x4e, 0x58, 0x69);
     colors.ink = gop_rgb(0x24, 0x27, 0x24);
+    colors.game_field = gop_rgb(0x91, 0x94, 0x78);
+    colors.game_ink = gop_rgb(0x2b, 0x2e, 0x27);
 }
 
 static void draw_bevel_edges(
@@ -407,6 +415,158 @@ static void render_files(void) {
         );
 }
 
+static void render_snake(void) {
+    desktop_app_t *app = &apps[APP_SNAKE];
+    argus_surface_t *surface = &app->surface;
+    uint32_t x = content_x();
+    uint32_t y = content_y();
+    uint32_t width = content_width(app);
+    uint32_t height = content_height(app);
+    surface_fill_rect(surface, x, y, width, height, colors.game_field);
+
+    argus_snake_frame_v1_t frame;
+    if (!process_snake_frame(&frame)) {
+        surface_draw_text(
+            surface,
+            "UNAVAILABLE",
+            x + 8u,
+            y + 8u,
+            scale,
+            colors.game_ink
+        );
+        return;
+    }
+    snake_sequence = frame.sequence;
+    surface_draw_text(surface, "SCORE", x + 8u, y + 8u, scale, colors.game_ink);
+    (void)draw_decimal(
+        surface,
+        frame.score,
+        x + 8u + 6u * 6u * scale,
+        y + 8u,
+        colors.game_ink
+    );
+    const char *controls = "WASD  R RESET";
+    uint32_t controls_width = text_width(controls, scale);
+    if (controls_width + 8u < width)
+        surface_draw_text(
+            surface,
+            controls,
+            x + width - controls_width - 8u,
+            y + 8u,
+            scale,
+            colors.game_ink
+        );
+
+    uint32_t cell_size = scale == 2u ? 14u : 12u;
+    uint32_t board_width = ARGUS_SNAKE_GRID_WIDTH * cell_size + 2u;
+    uint32_t board_height = ARGUS_SNAKE_GRID_HEIGHT * cell_size + 2u;
+    uint32_t board_x = x + (width - board_width) / 2u;
+    uint32_t board_y = y + 12u * scale + 12u;
+    if (board_y + board_height > y + height)
+        board_y = y + height - board_height - 4u;
+    surface_fill_rect(
+        surface,
+        board_x,
+        board_y,
+        board_width,
+        1u,
+        colors.game_ink
+    );
+    surface_fill_rect(
+        surface,
+        board_x,
+        board_y + board_height - 1u,
+        board_width,
+        1u,
+        colors.game_ink
+    );
+    surface_fill_rect(
+        surface,
+        board_x,
+        board_y,
+        1u,
+        board_height,
+        colors.game_ink
+    );
+    surface_fill_rect(
+        surface,
+        board_x + board_width - 1u,
+        board_y,
+        1u,
+        board_height,
+        colors.game_ink
+    );
+
+    for (uint32_t row = 0; row < ARGUS_SNAKE_GRID_HEIGHT; ++row) {
+        for (uint32_t column = 0; column < ARGUS_SNAKE_GRID_WIDTH; ++column) {
+            uint8_t cell = frame.cells[row * ARGUS_SNAKE_GRID_WIDTH + column];
+            uint32_t cell_x = board_x + 1u + column * cell_size;
+            uint32_t cell_y = board_y + 1u + row * cell_size;
+            if (cell == ARGUS_SNAKE_CELL_BODY)
+                surface_fill_rect(
+                    surface,
+                    cell_x + 2u,
+                    cell_y + 2u,
+                    cell_size - 3u,
+                    cell_size - 3u,
+                    colors.game_ink
+                );
+            else if (cell == ARGUS_SNAKE_CELL_HEAD)
+                surface_fill_rect(
+                    surface,
+                    cell_x + 1u,
+                    cell_y + 1u,
+                    cell_size - 1u,
+                    cell_size - 1u,
+                    colors.game_ink
+                );
+            else if (cell == ARGUS_SNAKE_CELL_FOOD) {
+                uint32_t food_size = cell_size > 8u ? 7u : 5u;
+                uint32_t inset = (cell_size - food_size) / 2u;
+                surface_fill_rect(
+                    surface,
+                    cell_x + inset,
+                    cell_y + inset,
+                    food_size,
+                    food_size,
+                    colors.game_ink
+                );
+                surface_fill_rect(
+                    surface,
+                    cell_x + inset + 2u,
+                    cell_y + inset + 2u,
+                    food_size - 4u,
+                    food_size - 4u,
+                    colors.game_field
+                );
+            }
+        }
+    }
+
+    if (frame.state == ARGUS_SNAKE_STATE_GAME_OVER) {
+        const char *message = "GAME OVER  R RESET";
+        uint32_t message_width = text_width(message, scale);
+        uint32_t message_x = x + (width - message_width) / 2u;
+        uint32_t message_y = board_y + (board_height - 7u * scale) / 2u;
+        surface_fill_rect(
+            surface,
+            message_x - 6u,
+            message_y - 4u,
+            message_width + 12u,
+            7u * scale + 8u,
+            colors.game_field
+        );
+        surface_draw_text(
+            surface,
+            message,
+            message_x,
+            message_y,
+            scale,
+            colors.game_ink
+        );
+    }
+}
+
 static void render_panel(void) {
     surface_clear(&panel_surface, colors.chrome);
     surface_fill_rect(
@@ -465,16 +625,20 @@ static int initialize_surfaces(uint32_t width, uint32_t work_height) {
     uint32_t utility_width = width >= 700u ? 400u : width - 24u;
     uint32_t system_height = minimum(220u, work_height - 24u);
     uint32_t files_height = minimum(320u, work_height - 24u);
+    uint32_t snake_width = width >= 700u ? 400u : width - 24u;
+    uint32_t snake_height = minimum(360u, work_height - 24u);
 
     console_width = minimum(console_width, width - 24u);
     console_height = minimum(console_height, work_height - 24u);
     if (console_width < 320u || console_height < 200u ||
-        utility_width < 280u || system_height < 160u || files_height < 200u)
+        utility_width < 280u || system_height < 160u || files_height < 200u ||
+        snake_width < 280u || snake_height < 240u)
         return 0;
 
     if (!surface_init(&apps[APP_CONSOLE].surface, console_width, console_height) ||
         !surface_init(&apps[APP_SYSTEM].surface, utility_width, system_height) ||
         !surface_init(&apps[APP_FILES].surface, utility_width, files_height) ||
+        !surface_init(&apps[APP_SNAKE].surface, snake_width, snake_height) ||
         !surface_init(&panel_surface, width, panel_height)) {
         destroy_surfaces();
         return 0;
@@ -497,6 +661,8 @@ static int initialize_compositor(const argus_gop_t *g, uint32_t work_height) {
     uint32_t console_y = work_height >= 650u ? 96u : 32u;
     uint32_t system_y = work_height >= 300u ? 40u : 8u;
     uint32_t files_y = system_y + apps[APP_SYSTEM].surface.height + 24u;
+    uint32_t snake_x = (g->width - apps[APP_SNAKE].surface.width) / 2u;
+    uint32_t snake_y = work_height >= 500u ? 72u : 12u;
     if (files_y > work_height - apps[APP_FILES].surface.height)
         files_y = work_height - apps[APP_FILES].surface.height;
 
@@ -518,6 +684,12 @@ static int initialize_compositor(const argus_gop_t *g, uint32_t work_height) {
             utility_x,
             files_y,
             &apps[APP_FILES].compositor_id) ||
+        !compositor_add_window(
+            &compositor,
+            &apps[APP_SNAKE].surface,
+            snake_x,
+            snake_y,
+            &apps[APP_SNAKE].compositor_id) ||
         !compositor_set_panel(&compositor, &panel_surface, work_height))
         return 0;
     return compositor_raise_window(
@@ -530,6 +702,7 @@ static void activate_app(uint32_t app_index) {
     if (app_index >= APP_COUNT) return;
     uint32_t previous = active_app;
     active_app = app_index;
+    process_snake_set_active(app_index == APP_SNAKE);
     (void)compositor_raise_window(
         &compositor,
         apps[app_index].compositor_id
@@ -564,6 +737,7 @@ int desktop_init(void) {
     pointer_buttons = 0;
     drag_moves = 0;
     system_tick_bucket = UINT64_MAX;
+    snake_sequence = 0;
 
     if (!initialize_surfaces(g->width, work_height) ||
         !initialize_compositor(g, work_height)) {
@@ -577,6 +751,7 @@ int desktop_init(void) {
     }
     render_system();
     render_files();
+    render_snake();
     render_panel();
 
     desktop_app_t *console_app = &apps[APP_CONSOLE];
@@ -625,6 +800,7 @@ int desktop_redraw(void) {
     for (uint32_t i = 0; i < APP_COUNT; ++i) render_chrome(i);
     render_system();
     render_files();
+    render_snake();
     render_panel();
     compositor_damage_all(&compositor);
     return compositor_validate(&compositor);
@@ -642,15 +818,23 @@ void desktop_refresh_apps(void) {
     if (!desktop_online) return;
     render_system();
     render_files();
+    render_snake();
 }
 
 void desktop_tick(uint64_t ticks) {
     if (!desktop_online) return;
     uint64_t bucket = ticks / 100u;
-    if (bucket == system_tick_bucket) return;
-    system_tick_bucket = bucket;
+    argus_snake_frame_v1_t frame;
+    int snake_changed = process_snake_frame(&frame) &&
+        frame.sequence != snake_sequence;
+    int system_changed = bucket != system_tick_bucket;
+    if (!snake_changed && !system_changed) return;
     desktop_pointer_hide();
-    render_system();
+    if (system_changed) {
+        system_tick_bucket = bucket;
+        render_system();
+    }
+    if (snake_changed) render_snake();
     (void)compositor_present(&compositor);
     desktop_pointer_show();
 }
@@ -661,8 +845,15 @@ int desktop_focus_app(const char *name) {
     if (strings_equal(name, "console")) app_index = APP_CONSOLE;
     else if (strings_equal(name, "system")) app_index = APP_SYSTEM;
     else if (strings_equal(name, "files")) app_index = APP_FILES;
+    else if (strings_equal(name, "snake")) app_index = APP_SNAKE;
     else return 0;
     activate_app(app_index);
+    return 1;
+}
+
+int desktop_key_event(uint8_t key) {
+    if (!desktop_online || active_app != APP_SNAKE) return 0;
+    (void)process_snake_input(key);
     return 1;
 }
 

@@ -13,6 +13,7 @@ typedef struct {
 } paging_info_t;
 
 #define ARGUS_USER_TABLE_MAX_PAGES 16u
+#define ARGUS_USER_BASE 0x0000008000000000ULL
 
 typedef struct {
     uint64_t root_table;

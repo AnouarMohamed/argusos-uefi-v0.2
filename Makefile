@@ -1,5 +1,8 @@
 CLANG ?= clang
+USER_CXX ?= clang++
 LLD   ?= lld-link
+LD_LLD ?= ld.lld
+OBJCOPY ?= objcopy
 RUSTC ?= rustc
 PYTHON ?= python3
 CFLAGS = -target x86_64-pc-win32-coff -ffreestanding -fshort-wchar -mno-red-zone \
@@ -8,13 +11,19 @@ RUST_TARGET = x86_64-pc-windows-msvc
 RUSTFLAGS = --target $(RUST_TARGET) --crate-type lib --emit=obj \
             --edition=2021 -D warnings -C panic=abort \
             -C opt-level=2 -C overflow-checks=yes
+USER_CXXFLAGS = -target x86_64-none-elf -std=c++20 -ffreestanding \
+                -fno-exceptions -fno-rtti -fno-stack-protector -fno-builtin \
+                -fno-threadsafe-statics -fno-use-cxa-atexit \
+                -fno-asynchronous-unwind-tables -fno-unwind-tables \
+                -fpie -mno-red-zone -mno-sse -mno-sse2 \
+                -Wall -Wextra -Werror -O2
 
 OBJS = build/main.obj build/boot.obj build/kernel.obj build/acpi.obj build/ahci.obj build/apic.obj build/block.obj \
        build/arch.obj build/compositor.obj build/desktop.obj build/heap.obj build/input.obj build/kconsole.obj \
        build/kernel_shell.obj build/memory.obj build/module.obj build/paging.obj build/fat32.obj \
        build/pci.obj build/pmm.obj build/process.obj build/ps2.obj build/serial.obj \
        build/ramfs.obj build/surface.obj build/rust_probe.obj build/rust_ramfs.obj build/rust_fat32.obj \
-       build/uefi_memory.obj build/cpu.obj build/gop.obj build/console.obj build/font5x7.obj
+       build/uefi_memory.obj build/cpu.obj build/user_images.obj build/gop.obj build/console.obj build/font5x7.obj
 
 all: build/BOOTX64.EFI
 
@@ -45,7 +54,7 @@ build/block.obj: src/block.c src/block.h | build
 build/compositor.obj: src/compositor.c src/compositor.h src/gop.h src/surface.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-build/desktop.obj: src/desktop.c src/desktop.h src/apic.h src/compositor.h src/console.h src/fat32.h src/gop.h src/heap.h src/input.h src/pmm.h src/ramfs.h src/surface.h | build
+build/desktop.obj: src/desktop.c src/desktop.h src/apic.h src/compositor.h src/console.h src/fat32.h src/gop.h src/heap.h src/input.h src/pmm.h src/process.h src/ramfs.h src/snake_abi.h src/surface.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/arch.obj: src/arch.c src/arch.h src/apic.h src/kernel.h | build
@@ -96,10 +105,10 @@ build/pci.obj: src/pci.c src/pci.h | build
 build/pmm.obj: src/pmm.c src/pmm.h src/boot_info.h src/uefi_memory.h src/efi.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-build/process.obj: src/process.c src/process.h src/arch.h src/paging.h src/pmm.h src/serial.h src/user_abi.h | build
+build/process.obj: src/process.c src/process.h src/apic.h src/arch.h src/input_keys.h src/paging.h src/pmm.h src/serial.h src/snake_abi.h src/user_abi.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-build/ps2.obj: src/ps2.c src/ps2.h src/acpi.h src/apic.h src/arch.h | build
+build/ps2.obj: src/ps2.c src/ps2.h src/acpi.h src/apic.h src/arch.h src/input_keys.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/serial.obj: src/serial.c src/serial.h | build
@@ -109,6 +118,20 @@ build/uefi_memory.obj: src/uefi_memory.c src/uefi_memory.h src/efi.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/cpu.obj: src/cpu.S | build
+	$(CLANG) -target x86_64-pc-win32-coff -c $< -o $@
+
+build/user_snake.o: user/snake.cpp src/input_keys.h src/snake_abi.h src/user_abi.h | build
+	$(USER_CXX) $(USER_CXXFLAGS) -c $< -o $@
+
+build/user_snake.elf: build/user_snake.o user/snake.ld
+	$(LD_LLD) -nostdlib -static -T user/snake.ld $< -o $@
+
+build/user_snake.bin: build/user_snake.elf
+	$(OBJCOPY) --only-section=.text -O binary $< $@
+	test "$$(wc -c < $@)" -gt 0
+	test "$$(wc -c < $@)" -le 16384
+
+build/user_images.obj: src/user_images.S build/user_snake.bin | build
 	$(CLANG) -target x86_64-pc-win32-coff -c $< -o $@
 
 build/gop.obj: src/gop.c src/gop.h src/efi.h | build

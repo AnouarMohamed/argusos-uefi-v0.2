@@ -56,6 +56,7 @@ static void print_help(void) {
     kconsole_write("  alloc N      allocate, verify, and free N bytes\n");
     kconsole_write("  modules      validated kernel modules\n");
     kconsole_write("  processes    user process and scheduler state\n");
+    kconsole_write("  snake        C++ user game state\n");
     kconsole_write("  fs           Rust RAMFS statistics\n");
     kconsole_write("  ls           list RAMFS files\n");
     kconsole_write("  cat PATH     print a RAMFS file\n");
@@ -71,7 +72,7 @@ static void print_help(void) {
     kconsole_write("  input        native input backends\n");
     kconsole_write("  irqtest      confirm IRQ keyboard command delivery\n");
     kconsole_write("  apps         surfaces and active application\n");
-    kconsole_write("  focus NAME   focus console, system, or files\n");
+    kconsole_write("  focus NAME   focus console, system, files, or snake\n");
     kconsole_write("  ui           pointer and compositor state\n");
     kconsole_write("  desktop      redraw the framebuffer desktop\n");
     kconsole_write("  clear        clear framebuffer/terminal\n");
@@ -85,7 +86,7 @@ static void print_status(
     const acpi_info_t *acpi,
     const paging_info_t *paging
 ) {
-    kconsole_write("\nArgusOS kernel v0.15\n");
+    kconsole_write("\nArgusOS kernel v0.16\n");
     kconsole_write("Boot Services: exited\nCPUs: ");
     kconsole_write_dec(acpi->enabled_cpu_count);
     kconsole_write("\nCR3: ");
@@ -118,6 +119,28 @@ static void print_modules(void) {
         kconsole_write(")\n");
     }
     kconsole_write("MODULES_OK\n");
+}
+
+static void print_snake_status(void) {
+    argus_snake_frame_v1_t frame;
+    if (!process_snake_online() || !process_snake_frame(&frame)) {
+        kconsole_write("Snake user app: unavailable\nSNAKE_FRAME_FAIL\n");
+        return;
+    }
+    kconsole_write("Snake user app: C++ ring 3\nState: ");
+    kconsole_write(frame.state == ARGUS_SNAKE_STATE_PLAYING
+        ? "playing" : "game over");
+    kconsole_write("\nScore: ");
+    kconsole_write_dec(frame.score);
+    kconsole_write("\nLength: ");
+    kconsole_write_dec(frame.length);
+    kconsole_write("\nFrame: ");
+    kconsole_write_dec(frame.sequence);
+    kconsole_write("\nInputs delivered: ");
+    kconsole_write_dec(process_snake_input_count());
+    kconsole_write(process_snake_input_count()
+        ? "\nSNAKE_INPUT_OK\n" : "\nSNAKE_INPUT_IDLE\n");
+    kconsole_write("CPP_USER_APP_OK\nSNAKE_FRAME_OK\n");
 }
 
 static void print_ramfs_error(int32_t status) {
@@ -427,9 +450,12 @@ static void execute_command(
         kconsole_write("\nAddress spaces: ");
         kconsole_write(process_address_space_isolated()
             ? "isolated" : "invalid");
+        kconsole_write("\nC++ app: ");
+        kconsole_write(process_snake_online() ? "snake (ring 3)" : "unavailable");
         kconsole_write(process_scheduler_online()
             ? "\nUSERSPACE_STATUS_OK\n" : "\nUSERSPACE_STATUS_FAIL\n");
     }
+    else if (strings_equal(line, "snake")) print_snake_status();
     else if (strings_equal(line, "fs")) print_ramfs_status();
     else if (strings_equal(line, "ls")) list_ramfs();
     else if (starts_with(line, "cat ")) cat_ramfs(line + 4);
@@ -482,7 +508,7 @@ static void execute_command(
     }
     else if (starts_with(line, "focus "))
         kconsole_write(desktop_focus_app(line + 6)
-            ? "APP_FOCUS_OK\n" : "usage: focus console|system|files\n");
+            ? "APP_FOCUS_OK\n" : "usage: focus console|system|files|snake\n");
     else if (strings_equal(line, "ui")) {
         kconsole_write("Pointer: ");
         kconsole_write(input_has_pointer() ? "online" : "unavailable");
@@ -537,6 +563,8 @@ void kernel_shell_run(
         serial_write("SURFACE_SELF_TEST_PASS\n");
         serial_write("COMPOSITOR_ONLINE\n");
         serial_write("DESKTOP_APPS_ONLINE\n");
+        serial_write(process_snake_online()
+            ? "SNAKE_APP_ONLINE\n" : "SNAKE_APP_UNAVAILABLE\n");
     }
     serial_write(input_keyboard_uses_irq()
         ? "PS2_IRQ_ONLINE\n" : "PS2_POLLING_FALLBACK\n");
@@ -548,7 +576,17 @@ void kernel_shell_run(
     (void)desktop_present();
 
     for (;;) {
-        int value = input_getc_nonblocking();
+        int value = input_serial_getc_nonblocking();
+        if (value < 0) {
+            int keyboard_value = input_keyboard_getc_nonblocking();
+            if (keyboard_value >= 0 &&
+                desktop_key_event((uint8_t)keyboard_value)) {
+                (void)process_run_ready_once();
+                desktop_tick(apic_timer_ticks());
+                continue;
+            }
+            value = keyboard_value;
+        }
         if (value < 0) {
             input_pointer_event_t pointer_event;
             if (input_pointer_event_nonblocking(&pointer_event)) {
@@ -557,8 +595,11 @@ void kernel_shell_run(
                     pointer_event.dy,
                     pointer_event.buttons
                 );
+                (void)process_run_ready_once();
+                desktop_tick(apic_timer_ticks());
                 continue;
             }
+            (void)process_run_ready_once();
             desktop_tick(apic_timer_ticks());
             cpu_wait_for_interrupt();
             continue;
@@ -586,6 +627,8 @@ void kernel_shell_run(
             line[used++] = c;
             kconsole_putc(c);
         }
+        (void)process_run_ready_once();
+        desktop_tick(apic_timer_ticks());
         (void)desktop_present();
     }
 }

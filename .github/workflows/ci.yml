@@ -48,6 +48,10 @@ jobs:
           test -s build/compositor.obj
           test -s build/surface.obj
           test -s build/process.obj
+          test -s build/user_snake.o
+          test -s build/user_snake.elf
+          test -s build/user_snake.bin
+          test -s build/user_images.obj
           test -s build/pci.obj
           test -s build/ahci.obj
           test -s build/rust_probe.obj
@@ -68,6 +72,9 @@ jobs:
           test -z "$fat32_symbols"
           nm -u build/rust_fat32.obj | grep -Fq "memcpy"
           nm -u build/rust_fat32.obj | grep -Fq "memset"
+          test -z "$(nm -u build/user_snake.o)"
+          test "$(wc -c < build/user_snake.bin)" -le 16384
+          readelf -h build/user_snake.elf | grep -Fq "0x8000001000"
           test -z "$(objdump -p build/BOOTX64.EFI | grep 'DLL Name')"
           file build/BOOTX64.EFI
           ls -l build/BOOTX64.EFI
@@ -117,7 +124,7 @@ jobs:
 
       - name: Validate smoke-test transcript
         run: |
-          grep -Fq "ArgusOS UEFI Study Monitor v0.15" qemu.log
+          grep -Fq "ArgusOS UEFI Study Monitor v0.16" qemu.log
           grep -Fq "ARGUS_KERNEL_ONLINE" qemu.log
           grep -Fq "BOOT_SERVICES_EXITED" qemu.log
           grep -Fq "PMM_SELF_TEST_PASS" qemu.log
@@ -148,10 +155,13 @@ jobs:
           grep -Fq "USER_ADDRESS_SPACE_ISOLATION_PASS" qemu.log
           grep -Fq "COOPERATIVE_SCHEDULER_PASS" qemu.log
           grep -Fq "USER_PROCESS_SELF_TEST_PASS" qemu.log
+          grep -Fq "CPP_USERSPACE_ONLINE" qemu.log
+          grep -Fq "SNAKE_USER_APP_ONLINE" qemu.log
           grep -Fq "DESKTOP_UI_ONLINE" qemu.log
           grep -Fq "SURFACE_SELF_TEST_PASS" qemu.log
           grep -Fq "COMPOSITOR_ONLINE" qemu.log
           grep -Fq "DESKTOP_APPS_ONLINE" qemu.log
+          grep -Fq "SNAKE_APP_ONLINE" qemu.log
           grep -Fq "DESKTOP_UI_REDRAWN" qemu.log
           grep -Fq "PS2_IRQ_ONLINE" qemu.log
           grep -Fq "PS2_MOUSE_IRQ_ONLINE" qemu.log
@@ -161,13 +171,19 @@ jobs:
           grep -Fq "COMPOSITOR_APPS_OK" qemu.log
           grep -Fq "APP_FOCUS_OK" qemu.log
           grep -Fq "Active app: SYSTEM" qemu.log
+          grep -Fq "Active app: SNAKE" qemu.log
           grep -Fq "KERNEL_SHELL_READY" qemu.log
           grep -Fq "STATUS_OK" qemu.log
-          grep -Fq "Processes: 2" qemu.log
+          grep -Fq "Processes: 3" qemu.log
           grep -Fq "Completed: 2" qemu.log
-          grep -Fq "Syscalls: 10" qemu.log
-          grep -Fq "Context switches: 4" qemu.log
+          grep -Fq "Syscalls: 16" qemu.log
+          grep -Fq "Context switches: 5" qemu.log
+          grep -Fq "C++ app: snake (ring 3)" qemu.log
           grep -Fq "USERSPACE_STATUS_OK" qemu.log
+          grep -Fq "SNAKE_INPUT_OK" qemu.log
+          grep -Fq "CPP_USER_APP_OK" qemu.log
+          grep -Fq "SNAKE_FRAME_OK" qemu.log
+          grep -Fq "Surfaces: 4" qemu.log
           grep -Fq "MODULES_OK" qemu.log
           grep -Fq "ALLOC_OK" qemu.log
           grep -Fq "rust.ramfs (ABI 1)" qemu.log
@@ -190,9 +206,11 @@ jobs:
           test -s build/qemu-desktop.ppm
           test -s build/qemu-desktop-dragged.ppm
           test -s build/qemu-desktop-apps.ppm
+          test -s build/qemu-desktop-snake.ppm
           file build/qemu-desktop.ppm
           file build/qemu-desktop-dragged.ppm
           file build/qemu-desktop-apps.ppm
+          file build/qemu-desktop-snake.ppm
 
       - name: Upload desktop captures
         uses: actions/upload-artifact@v4
@@ -202,6 +220,7 @@ jobs:
             build/qemu-desktop.ppm
             build/qemu-desktop-dragged.ppm
             build/qemu-desktop-apps.ppm
+            build/qemu-desktop-snake.ppm
           if-no-files-found: error
 
       - name: Require protected fault paths

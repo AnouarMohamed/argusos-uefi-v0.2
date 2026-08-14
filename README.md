@@ -1,4 +1,4 @@
-# ArgusOS UEFI Study Kernel v0.15
+# ArgusOS UEFI Study Kernel v0.16
 
 A deliberately small x86-64 UEFI bare-metal study kernel.
 
@@ -33,10 +33,10 @@ kernel with framebuffer and direct COM1 output.
 - ACPI XSDT/MADT discovery locates processors and interrupt controllers.
 - The legacy PIC is masked and a periodic local-APIC timer supplies interrupts.
 - A native PS/2 Set-1 keyboard decoder handles normal keys, Shift, Caps Lock,
-  Enter, Backspace, and Tab without firmware services.
+  Enter, Backspace, Tab, and extended arrow keys without firmware services.
 - A post-firmware kernel monitor accepts commands through COM1 or PS/2 while
   rendering to the framebuffer and serial terminal.
-- A restrained ArgusOS desktop composites retained Console, System, and Files
+- A restrained ArgusOS desktop composites retained Console, System, Files, and Snake
   surfaces with focus, z-order, damage tracking, dragging, and a software pointer.
 - Versioned, validated C ABIs host statically linked `no_std` Rust checksum and
   RAMFS components without giving Rust boot, allocator, interrupt, or device ownership.
@@ -56,12 +56,16 @@ kernel with framebuffer and direct COM1 output.
   into PMM-owned memory after firmware exit.
 - A bounded read-only Rust FAT32 parser validates BPB geometry, enumerates root
   8.3 entries, and follows FAT chains through the block-device boundary.
-- Two embedded user images execute at CPU privilege level 3 with private CR3
+- Two boot probe processes execute at CPU privilege level 3 with private CR3
   roots, separate code/stack pages, an unmapped stack guard, and W^X mappings.
 - A versioned syscall ABI provides bounded serial writes, PID lookup, cooperative
   yield, and exit through x86-64 `SYSCALL`/`SYSRET` transitions.
 - A minimal round-robin scheduler preserves user register state across yields and
   proves that both isolated probe processes resume and exit successfully.
+- A persistent freestanding C++20 Snake process runs at ring 3 with no standard
+  library, exceptions, RTTI, writable globals, allocator, or direct hardware access.
+- The kernel validates fixed-size Snake frames, routes focused PS/2 arrow/WASD
+  input, and renders the game through the existing retained compositor.
 
 ## What is *not* implemented yet?
 
@@ -74,14 +78,16 @@ DMA bounce buffer. There is no partition-table traversal, AHCI interrupt/NCQ pat
 hotplug, storage write path, preemptive scheduler, ELF loader, dynamic process
 creation, user-mode fault recovery, IPC, networking, USB HID stack, user-space
 display server, or SMP startup. The v0.14 compositor and utility apps remain
-kernel-hosted prototypes, not process-isolated applications. The v0.15 user
-processes are boot-time flat-image probes rather than a general application model.
+kernel-hosted prototypes, not process-isolated applications. Snake is a persistent
+v0.16 user process, but its flat image is embedded at build time and its narrow
+frame ABI is game-specific rather than a general display protocol.
 Runtime Services memory is preserved, but the kernel does not call Runtime
 Services after the handoff.
 
 ## Build
 
-Requires Python 3.10+, Clang 17-ish, `lld-link`, and Rust 1.97.1 with the
+Requires Python 3.10+, Clang/Clang++ 17-ish, `lld-link`, `ld.lld`, GNU `objcopy`,
+and Rust 1.97.1 with the
 `x86_64-pc-windows-msvc` target. The checked-in `rust-toolchain.toml` configures
 Rust automatically when `rustup` is available:
 
@@ -108,7 +114,9 @@ disk through DMA, mounts that disk with the Rust FAT32 parser, and verifies root
 listing, case-insensitive lookup, file reads, and missing-path handling. It now
 boots with a standard VGA device, requires keyboard and mouse IRQ markers, drags
 the console through damage-aware composition, focuses the System app, and captures
-the initial, moved, and focus states. It also verifies the defining palette colors.
+the initial, moved, and focus states. It also focuses Snake, injects a hardware
+direction key, requires a new ring-3 frame, and captures the playable game window.
+The defining palette colors are verified in every framebuffer capture.
 The sparse in-memory FAT32 device remains available as a deterministic fallback.
 
 The media creation, OVMF discovery, serial synchronization, and shell probes are
@@ -186,6 +194,7 @@ memtest
 alloc 4096
 modules
 processes
+snake
 fs
 ls
 cat /README
@@ -224,6 +233,8 @@ src/paging.c    kernel-owned identity page tables and memory attributes
 src/process.c   isolated user images, syscall validation, and cooperative scheduler
 src/process.h   process state and kernel-facing diagnostics
 src/user_abi.h  versioned syscall numbers shared with freestanding user programs
+src/snake_abi.h validated C/C++ game-frame contract
+src/input_keys.h shared extended keyboard values
 src/acpi.c      validated RSDP/XSDT/MADT discovery and IRQ overrides
 src/arch.c      GDT, IDT, TSS/IST, exception dispatch, and PIC masking
 src/apic.c      local APIC timer and I/O-APIC interrupt routing
@@ -254,6 +265,9 @@ src/gop.c       GOP discovery and raw framebuffer pixel operations
 src/console.c   Argus framebuffer terminal + UEFI text fallback
 src/font5x7.c   tiny built-in 5x7 terminal font
 src/cpu.S       CPU instructions, stack switch, and interrupt entry stubs
+src/user_images.S embeds separately linked user images in the EFI payload
+user/snake.cpp  freestanding persistent C++20 Snake process
+user/snake.ld   fixed-address user image layout and size/storage assertions
 assets/HELLO.TXT hardware-backed FAT32 smoke-test payload
 Makefile        freestanding PE/COFF build
 tools/argus.py  FAT image creation and interactive QEMU smoke runner
@@ -266,6 +280,7 @@ docs/desktop-ui-v0.12.md first desktop slice, renderer boundary, and limitations
 docs/pointer-ui-v0.13.md PS/2 mouse, cursor, hit testing, and dragging boundary
 docs/surface-compositor-v0.14.md retained surfaces, compositor, and app boundary
 docs/userspace-v0.15.md ring-3, syscall, address-space, and scheduler boundary
+docs/cpp-snake-v0.16.md C++ image, game ABI, input, rendering, and limits
 PRODUCT.md      product intent, personality, anti-references, and principles
 DESIGN.md       normative ArgusOS desktop tokens and component rules
 ```
@@ -282,9 +297,9 @@ DESIGN.md       normative ArgusOS desktop tokens and component rules
   It currently owns a stateless checksum and the fixed-capacity RAMFS path/file
   state machine plus the read-only FAT32 parser used by the Files app, with no
   allocator or hardware access.
-- C++ is reserved for freestanding user applications and the future display-server
-  toolkit, starting in v0.16 now that v0.15 provides a ring-3 and syscall boundary.
-  The first C++ image will be statically embedded until executable loading exists.
+- C++ owns the persistent ring-3 Snake game logic and is reserved for future user
+  applications and the display-server toolkit. It is freestanding and exception-free;
+  its first flat image remains statically embedded until executable loading exists.
 - Boot, page tables, allocators, interrupt control, and device ownership remain
   in C and x86-64 assembly until a later ABI explicitly and safely exposes them.
 - Do not add languages merely by subsystem count: every language adds a
@@ -429,7 +444,7 @@ Implemented:
 
 Still implement:
 
-- persistent processes instead of boot-time validation probes
+- general process lifecycle beyond the persistent Snake app and boot-time probes
 - preemption and timer-driven scheduling
 - ELF loading and dynamic process creation
 - user exception recovery, termination, IPC, and shared display surfaces
@@ -462,19 +477,32 @@ Still implement:
 - a minimal user-space display-server protocol
 
 The v0.14 desktop proves the surface contract and interaction model. Its apps are
-intentionally small and honest, but still execute inside the kernel; v0.15 does
-not silently relabel them as user applications.
+intentionally small and honest, but still execute inside the kernel. v0.16 adds
+Snake as a separate user process without relabeling those utilities.
 
-### Stage L — C++ windowed UI, targeted for v0.16
+### Stage L: first C++ user app, completed in v0.16
 
-C++ enters the build here. The first v0.16 slice will compile a freestanding,
-exception-free C++ user image with explicit construction and no standard-library
-runtime assumptions, then launch it through the v0.15 process boundary. Moving the
-v0.14 compositor into a durable user-space window server still requires persistent
-scheduling, IPC/shared surfaces, and executable loading. Kernel drivers and
-ownership boundaries stay in C; bounded data components may remain Rust. The first
-durable UI milestone remains a real client terminal window using a display protocol
-instead of kernel-owned framebuffer state.
+Implemented:
+
+- a separately linked freestanding C++20 image with a fixed 16 KiB code budget
+- build-time rejection of writable globals and unresolved runtime dependencies
+- a persistent cooperative ring-3 process with its own CR3 and guarded stack
+- clock, focused-input, and validated Snake-frame syscalls
+- Nokia-style block Snake mechanics with score, food, collision, and restart
+- PS/2 arrow keys plus WASD, with serial control preserved for diagnostics
+- a muted monochrome Snake surface in the existing focus, task, drag, and damage model
+- QEMU gameplay coverage and a dedicated framebuffer capture
+
+Still implement:
+
+- a generic IPC/shared-surface protocol instead of the game-specific frame call
+- process creation from ELF files rather than embedded flat images
+- user-space ownership of the compositor and application toolkit
+- preemption, blocking waits, and user-fault termination
+
+Kernel drivers and framebuffer ownership stay in C for now. Rust continues to own
+bounded data components. The next architectural step is a general user application
+channel that can support a terminal client without adding one syscall per app.
 
 ## Exercises
 
@@ -498,5 +526,5 @@ contain early stack failures, while a volatile Rust RAMFS supplies the first fil
 namespace and a read-only Rust parser consumes sectors from the first block-device
 contract. It is a real kernel boundary, while still being far from a
 general-purpose OS. Its graphical desktop now has retained surfaces, three
-kernel-hosted utility apps, focus, z-order, and damage-aware movement, but it is
-not yet an interactive multi-process GUI.
+kernel-hosted utility apps, one persistent C++ ring-3 game, focus, z-order, and
+damage-aware movement, but it is not yet a general multi-process GUI.

@@ -258,19 +258,13 @@ int paging_user_space_create(
     for (unsigned index = 0; index < 512u; ++index)
         destination[index] = source[index];
 
-    unsigned user_index = 0;
-    for (unsigned index = 1u; index < 256u; ++index) {
-        if (!(destination[index] & PAGE_PRESENT)) {
-            user_index = index;
-            break;
-        }
-    }
-    if (!user_index) {
+    unsigned user_index = (unsigned)(ARGUS_USER_BASE >> 39);
+    if (destination[user_index] & PAGE_PRESENT) {
         paging_user_space_destroy(user_space);
         return 0;
     }
     user_space->root_table = root;
-    user_space->user_base = (uint64_t)user_index << 39;
+    user_space->user_base = ARGUS_USER_BASE;
     return 1;
 }
 

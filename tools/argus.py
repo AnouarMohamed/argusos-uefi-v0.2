@@ -51,10 +51,13 @@ BOOT_MARKERS = (
     b"USER_ADDRESS_SPACE_ISOLATION_PASS",
     b"COOPERATIVE_SCHEDULER_PASS",
     b"USER_PROCESS_SELF_TEST_PASS",
+    b"CPP_USERSPACE_ONLINE",
+    b"SNAKE_USER_APP_ONLINE",
     b"DESKTOP_UI_ONLINE",
     b"SURFACE_SELF_TEST_PASS",
     b"COMPOSITOR_ONLINE",
     b"DESKTOP_APPS_ONLINE",
+    b"SNAKE_APP_ONLINE",
     b"PS2_IRQ_ONLINE",
     b"PS2_MOUSE_IRQ_ONLINE",
     b"KERNEL_SHELL_READY",
@@ -66,6 +69,7 @@ SHELL_PROBES = (
     (b"focus files\r", b"APP_FOCUS_OK"),
     (b"modules\r", b"MODULES_OK"),
     (b"processes\r", b"USERSPACE_STATUS_OK"),
+    (b"snake\r", b"SNAKE_FRAME_OK"),
     (b"alloc 4096\r", b"ALLOC_OK"),
     (b"memtest\r", b"ALLOCATOR_HARDENING_PASS"),
     (b"input\r", b"PS/2 mode: I/O APIC IRQ"),
@@ -131,6 +135,10 @@ DESKTOP_PALETTE = {
     "terminal ink": bytes((0x17, 0x1A, 0x17)),
     "slate title": bytes((0x4E, 0x58, 0x69)),
 }
+SNAKE_PALETTE = {
+    "muted LCD field": bytes((0x91, 0x94, 0x78)),
+    "LCD ink": bytes((0x2B, 0x2E, 0x27)),
+}
 
 
 class ToolError(RuntimeError):
@@ -158,6 +166,14 @@ def verify_desktop_capture(path: Path) -> None:
     for name, rgb in DESKTOP_PALETTE.items():
         if rgb not in capture:
             raise ToolError(f"framebuffer capture is missing desktop color: {name}")
+
+
+def verify_snake_capture(path: Path) -> None:
+    verify_desktop_capture(path)
+    capture = path.read_bytes()
+    for name, rgb in SNAKE_PALETTE.items():
+        if rgb not in capture:
+            raise ToolError(f"Snake capture is missing game color: {name}")
 
 
 def create_fat_image(efi_binary: Path, output: Path, size_mib: int) -> None:
@@ -455,6 +471,29 @@ def run_smoke(args: argparse.Namespace) -> None:
         if not args.apps_screenshot.is_file():
             raise ToolError("QEMU did not create the focused-app screenshot")
         verify_desktop_capture(args.apps_screenshot)
+
+        session.send(b"focus snake\r")
+        session.expect(b"APP_FOCUS_OK", args.timeout)
+        session.expect(b"argus-kernel> ", args.timeout)
+        qmp.send_key("r")
+        time.sleep(0.05)
+        qmp.send_key("down")
+        time.sleep(0.15)
+        session.send(b"snake\r")
+        session.expect(b"SNAKE_INPUT_OK", args.timeout)
+        session.expect(b"CPP_USER_APP_OK", args.timeout)
+        session.expect(b"SNAKE_FRAME_OK", args.timeout)
+        session.expect(b"argus-kernel> ", args.timeout)
+        session.send(b"apps\r")
+        session.expect(b"Active app: SNAKE", args.timeout)
+        session.expect(b"COMPOSITOR_APPS_OK", args.timeout)
+        session.expect(b"argus-kernel> ", args.timeout)
+
+        args.snake_screenshot.parent.mkdir(parents=True, exist_ok=True)
+        qmp.execute("screendump", {"filename": str(args.snake_screenshot.resolve())})
+        if not args.snake_screenshot.is_file():
+            raise ToolError("QEMU did not create the Snake app screenshot")
+        verify_snake_capture(args.snake_screenshot)
     finally:
         try:
             if qmp is not None:
@@ -469,7 +508,7 @@ def run_smoke(args: argparse.Namespace) -> None:
     print(
         f"\nArgusOS smoke test passed; transcript: {args.log}; "
         f"framebuffer: {args.screenshot}; dragged: {args.drag_screenshot}; "
-        f"apps: {args.apps_screenshot}"
+        f"apps: {args.apps_screenshot}; snake: {args.snake_screenshot}"
     )
 
 
@@ -535,6 +574,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("build/qemu-desktop-apps.ppm"),
         help="framebuffer capture after focusing a utility app",
+    )
+    smoke.add_argument(
+        "--snake-screenshot",
+        type=Path,
+        default=Path("build/qemu-desktop-snake.ppm"),
+        help="framebuffer capture after exercising the C++ Snake app",
     )
     smoke.add_argument("--qemu", default="qemu-system-x86_64")
     smoke.add_argument("--ovmf-code", type=Path)

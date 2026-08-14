@@ -8,10 +8,13 @@ void input_init(const acpi_info_t *acpi) {
 }
 
 int input_getc_nonblocking(void) {
-    int value = serial_getc_nonblocking();
+    int value = input_serial_getc_nonblocking();
     if (value >= 0) return value;
-    return ps2_getc_nonblocking();
+    return input_keyboard_getc_nonblocking();
 }
+
+int input_serial_getc_nonblocking(void) { return serial_getc_nonblocking(); }
+int input_keyboard_getc_nonblocking(void) { return ps2_getc_nonblocking(); }
 
 int input_pointer_event_nonblocking(input_pointer_event_t *event) {
     if (!event) return 0;

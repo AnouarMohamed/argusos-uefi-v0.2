@@ -10,6 +10,8 @@ colors:
   terminal-text: "#c9c8b5"
   slate-title: "#4e5869"
   near-ink: "#242724"
+  lcd-field: "#919478"
+  lcd-ink: "#2b2e27"
 typography:
   title:
     fontFamily: "Argus 5x7 Bitmap, monospace"
@@ -53,6 +55,12 @@ components:
   utility-window:
     backgroundColor: "{colors.terminal-ink}"
     textColor: "{colors.terminal-text}"
+    typography: "{typography.body}"
+    rounded: "{rounded.square}"
+    padding: "8px"
+  game-window:
+    backgroundColor: "{colors.lcd-field}"
+    textColor: "{colors.lcd-ink}"
     typography: "{typography.body}"
     rounded: "{rounded.square}"
     padding: "8px"
@@ -101,6 +109,8 @@ tool styling while preserving clear terminal contrast.
 - **Chrome Highlight** (#d3d0c2): top and left bevel edges.
 - **Chrome Shadow** (#6e6c64): bottom and right bevel edges.
 - **Near Ink** (#242724): chrome text and pointer outline.
+- **Muted LCD Field** (#919478): the Snake board's low-glare monochrome field.
+- **LCD Ink** (#2b2e27): game cells, score, controls, and state text.
 
 ### Named Rules
 
@@ -179,6 +189,13 @@ System and Files use the same retained surface, title, content inset, focus, and
 dragging rules as the terminal. System displays live allocator, timer, and input
 state. Files displays real RAMFS and FAT32 entries. They do not invent actions or
 status that the kernel cannot provide.
+
+### Game Window
+
+Snake uses the same window frame, focus, task, and drag behavior as every other
+surface. Its content is a muted monochrome LCD field with block cells, one hollow
+food marker, score, compact keyboard controls, and an explicit game-over state.
+The title is simply `SNAKE`; no era or device branding appears in the UI.
 
 ### Focus and Composition
 

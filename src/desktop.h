@@ -9,6 +9,7 @@ int desktop_present(void);
 void desktop_refresh_apps(void);
 void desktop_tick(uint64_t ticks);
 int desktop_focus_app(const char *name);
+int desktop_key_event(uint8_t key);
 void desktop_pointer_set_enabled(int enabled);
 void desktop_pointer_show(void);
 void desktop_pointer_hide(void);

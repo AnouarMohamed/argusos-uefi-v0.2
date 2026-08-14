@@ -5,7 +5,7 @@
 #include "serial.h"
 #include "uefi_memory.h"
 
-#define ARGUS_VERSION "0.15"
+#define ARGUS_VERSION "0.16"
 
 static EFI_SYSTEM_TABLE *ST;
 static EFI_SIMPLE_TEXT_INPUT_PROTOCOL *IN;

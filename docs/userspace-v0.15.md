@@ -53,6 +53,10 @@ separate from the Microsoft x64 C calling convention used inside the EFI image.
 overflow, and validates every covered user page before reading it. There is no
 direct user access to framebuffer, devices, allocator state, or kernel pages.
 
+v0.16 extends the compatible ABI with clock ticks, focused input polling, and a
+validated Snake-frame presentation call. Those additions are documented in
+`docs/cpp-snake-v0.16.md`; the original four calls and their behavior are unchanged.
+
 ## Scheduler proof
 
 The boot scheduler is cooperative and round-robin. Probe 1 starts and yields,
@@ -72,6 +76,6 @@ dynamic spawn, preemption, user exception recovery, IPC, shared memory, file
 descriptors, or user display protocol. The retained desktop and its utility apps
 still run in the kernel.
 
-The next language milestone is v0.16: a minimal freestanding C++ user image. A
-persistent C++ display server follows only after scheduling, IPC/shared surfaces,
-and loading are strong enough to support a long-lived service.
+The next language milestone was completed in v0.16 with a persistent freestanding
+C++ Snake image. A C++ display server still follows only after scheduling,
+IPC/shared surfaces, and loading are strong enough to support a long-lived service.

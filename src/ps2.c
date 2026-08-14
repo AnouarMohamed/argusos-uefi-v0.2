@@ -1,6 +1,7 @@
 #include "ps2.h"
 #include "apic.h"
 #include "arch.h"
+#include "input_keys.h"
 #include <stdint.h>
 
 #define PS2_DATA_PORT 0x60u
@@ -75,7 +76,17 @@ static char translate_symbol(uint8_t scan_code, int shifted) {
 
 static int decode_scan_code(uint8_t scan_code) {
     if (scan_code == 0xE0u) { extended_prefix = 1; return -1; }
-    if (extended_prefix) { extended_prefix = 0; return -1; }
+    if (extended_prefix) {
+        extended_prefix = 0;
+        int released = (scan_code & 0x80u) != 0;
+        scan_code &= 0x7Fu;
+        if (released) return -1;
+        if (scan_code == 0x48u) return ARGUS_KEY_UP;
+        if (scan_code == 0x50u) return ARGUS_KEY_DOWN;
+        if (scan_code == 0x4Bu) return ARGUS_KEY_LEFT;
+        if (scan_code == 0x4Du) return ARGUS_KEY_RIGHT;
+        return -1;
+    }
 
     int released = (scan_code & 0x80u) != 0;
     scan_code &= 0x7Fu;

@@ -11,6 +11,8 @@ typedef struct {
 
 void input_init(const acpi_info_t *acpi);
 int input_getc_nonblocking(void);
+int input_serial_getc_nonblocking(void);
+int input_keyboard_getc_nonblocking(void);
 int input_pointer_event_nonblocking(input_pointer_event_t *event);
 int input_has_serial(void);
 int input_has_keyboard(void);
