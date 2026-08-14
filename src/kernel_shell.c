@@ -1,11 +1,13 @@
 #include "kernel_shell.h"
 #include "apic.h"
+#include "ahci.h"
 #include "block.h"
 #include "fat32.h"
 #include "heap.h"
 #include "input.h"
 #include "kconsole.h"
 #include "module.h"
+#include "pci.h"
 #include "pmm.h"
 #include "ramfs.h"
 
@@ -55,6 +57,8 @@ static void print_help(void) {
     kconsole_write("  cat PATH     print a RAMFS file\n");
     kconsole_write("  write P TEXT create or replace a RAMFS file\n");
     kconsole_write("  rm PATH      remove a RAMFS file\n");
+    kconsole_write("  pci          PCI discovery summary\n");
+    kconsole_write("  ahci         SATA controller statistics\n");
     kconsole_write("  disks        block-device statistics\n");
     kconsole_write("  fatinfo      mounted FAT32 geometry\n");
     kconsole_write("  fatls        list FAT32 root files\n");
@@ -73,7 +77,7 @@ static void print_status(
     const acpi_info_t *acpi,
     const paging_info_t *paging
 ) {
-    kconsole_write("\nArgusOS kernel v0.10\n");
+    kconsole_write("\nArgusOS kernel v0.11\n");
     kconsole_write("Boot Services: exited\nCPUs: ");
     kconsole_write_dec(acpi->enabled_cpu_count);
     kconsole_write("\nCR3: ");
@@ -207,6 +211,50 @@ static void print_fat32_error(int32_t status) {
     else if (status == ARGUS_FAT32_BUFFER_TOO_SMALL) kconsole_write("file too large");
     else kconsole_write("ABI failure");
     kconsole_write("\n");
+}
+
+static void print_pci(void) {
+    const pci_info_t *info = pci_info();
+    if (!info) {
+        kconsole_write("PCI unavailable.\n");
+        return;
+    }
+    kconsole_write("PCI functions: ");
+    kconsole_write_dec(info->device_count);
+    kconsole_write("\nAHCI controllers: ");
+    kconsole_write_dec(info->ahci_count);
+    if (info->ahci_count) {
+        kconsole_write("\nFirst AHCI BDF: ");
+        kconsole_write_hex(info->first_ahci.bus);
+        kconsole_putc(':');
+        kconsole_write_hex(info->first_ahci.device);
+        kconsole_putc('.');
+        kconsole_write_dec(info->first_ahci.function);
+        kconsole_write("\nVendor/device: ");
+        kconsole_write_hex(info->first_ahci.vendor_id);
+        kconsole_putc('/');
+        kconsole_write_hex(info->first_ahci.device_id);
+    }
+    kconsole_write("\nPCI_STATUS_OK\n");
+}
+
+static void print_ahci(void) {
+    const ahci_info_t *info = ahci_info();
+    if (!info) {
+        kconsole_write("AHCI unavailable.\n");
+        return;
+    }
+    kconsole_write("ABAR: ");
+    kconsole_write_hex(info->abar);
+    kconsole_write("\nVersion: ");
+    kconsole_write_hex(info->version);
+    kconsole_write("\nPort: ");
+    kconsole_write_dec(info->port);
+    kconsole_write("\nSectors: ");
+    kconsole_write_dec(info->sector_count);
+    kconsole_write("\n64-bit DMA: ");
+    kconsole_write(info->supports_64bit_dma ? "yes" : "no");
+    kconsole_write("\nAHCI_STATUS_OK\n");
 }
 
 static void print_disks(void) {
@@ -356,6 +404,8 @@ static void execute_command(
     else if (starts_with(line, "cat ")) cat_ramfs(line + 4);
     else if (starts_with(line, "write ")) write_ramfs(line + 6);
     else if (starts_with(line, "rm ")) remove_ramfs(line + 3);
+    else if (strings_equal(line, "pci")) print_pci();
+    else if (strings_equal(line, "ahci")) print_ahci();
     else if (strings_equal(line, "disks")) print_disks();
     else if (strings_equal(line, "fatinfo")) print_fat32_info();
     else if (strings_equal(line, "fatls")) list_fat32();

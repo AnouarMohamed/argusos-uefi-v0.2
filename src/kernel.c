@@ -1,5 +1,6 @@
 #include "kernel.h"
 #include "acpi.h"
+#include "ahci.h"
 #include "apic.h"
 #include "arch.h"
 #include "block.h"
@@ -9,6 +10,7 @@
 #include "kernel_shell.h"
 #include "module.h"
 #include "paging.h"
+#include "pci.h"
 #include "pmm.h"
 #include "ramfs.h"
 
@@ -78,7 +80,7 @@ void kernel_exception_panic(
 void kernel_main(const boot_info_t *boot_info) {
     kconsole_clear();
 
-    kprint("ArgusOS kernel v0.10\n");
+    kprint("ArgusOS kernel v0.11\n");
     kprint("ARGUS_KERNEL_ONLINE\n");
 
     if (!boot_info || boot_info->magic != ARGUS_BOOT_INFO_MAGIC ||
@@ -164,6 +166,27 @@ void kernel_main(const boot_info_t *boot_info) {
     kprint("RUST_RAMFS_SELF_TEST_PASS\n");
 
     if (!block_init()) panic("block-device initialization failed");
+    if (!pci_init() || !pci_self_test()) panic("PCI discovery failed");
+    const pci_info_t *pci = pci_info();
+    kprint("PCI_DISCOVERY_ONLINE\nPCI functions: ");
+    kprint_dec(pci->device_count);
+    kprint("\nAHCI controllers: ");
+    kprint_dec(pci->ahci_count);
+    kprint("\nPCI_SELF_TEST_PASS\n");
+
+    if (pci->ahci_count &&
+        ahci_init(&pci->first_ahci, &paging) &&
+        ahci_self_test() && block_use_device(ahci_block_device())) {
+        const ahci_info_t *storage = ahci_info();
+        kprint("AHCI_SATA_ONLINE\nAHCI port: ");
+        kprint_dec(storage->port);
+        kprint("\nAHCI sectors: ");
+        kprint_dec(storage->sector_count);
+        kprint("\nAHCI_IDENTIFY_PASS\n");
+    } else {
+        kprint("AHCI unavailable; using memory fixture.\n");
+    }
+
     const argus_block_device_v1_t *boot_device = block_default_device();
     if (!boot_device || !block_self_test()) panic("block-device self-test failed");
     kprint("BLOCK_DEVICE_ONLINE\nBlock device: ");

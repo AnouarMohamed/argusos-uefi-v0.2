@@ -1,4 +1,4 @@
-# ArgusOS UEFI Study Kernel v0.10
+# ArgusOS UEFI Study Kernel v0.11
 
 A deliberately small x86-64 UEFI bare-metal study kernel.
 
@@ -26,6 +26,8 @@ kernel with framebuffer and direct COM1 output.
 - The physical and heap allocators run self-tests on every kernel entry.
 - COM1 output and input remain available after firmware services are gone.
 - Kernel-owned page tables enable write protection and NX where possible.
+- Runtime MMIO registration marks discovered device BAR mappings cache-disabled
+  before drivers touch their registers.
 - An Argus GDT/IDT handles all architectural CPU exceptions and dispatches
   registered external interrupt handlers.
 - ACPI XSDT/MADT discovery locates processors and interrupt controllers.
@@ -47,6 +49,9 @@ kernel with framebuffer and direct COM1 output.
 - A bounded Rust RAM filesystem provides a first volatile file namespace with
   checked paths and create, read, enumerate, replace, and remove operations.
 - A C-owned block-device ABI presents sector geometry and checked whole-sector reads.
+- PCI configuration-space discovery locates AHCI-class SATA controllers.
+- A polling, read-only AHCI driver performs IDENTIFY DEVICE and LBA48 DMA reads
+  into PMM-owned memory after firmware exit.
 - A bounded read-only Rust FAT32 parser validates BPB geometry, enumerates root
   8.3 entries, and follows FAT chains through the block-device boundary.
 
@@ -55,9 +60,11 @@ kernel with framebuffer and direct COM1 output.
 The pre-boot monitor still uses UEFI keyboard input. The post-boot monitor owns
 its input path, but USB keyboards are not supported yet; physical machines whose
 firmware does not expose a PS/2-compatible keyboard will need an xHCI/USB HID
-driver. The FAT32 device is currently a sparse in-memory fixture rather than a
-physical disk. There is no storage write path, scheduler, userspace, networking,
-mouse/USB HID stack, window system, or SMP startup.
+driver. Storage currently supports the first 512-byte-sector LBA48 SATA device
+on the first discovered AHCI controller, using polling and a one-sector DMA
+bounce buffer. There is no partition-table traversal, AHCI interrupt/NCQ path,
+hotplug, storage write path, scheduler, userspace, networking, mouse/USB HID
+stack, window system, or SMP startup.
 Runtime Services memory is preserved, but the kernel does not call Runtime
 Services after the handoff.
 
@@ -84,8 +91,10 @@ kernel-shell markers. It drives COM1 commands, injects a QEMU hardware key
 sequence through the PS/2 IRQ path, verifies allocator invariants, and performs a
 RAMFS write/read/remove/not-found round trip. Separate negative boots require
 breakpoint, stack-guard page-fault, and double-fault diagnostics. The same boot
-also mounts a standards-shaped FAT32 fixture and verifies root listing,
-case-insensitive lookup, file reads, and missing-path handling.
+also discovers QEMU's PCI AHCI controller, identifies and reads the SATA boot
+disk through DMA, mounts that disk with the Rust FAT32 parser, and verifies root
+listing, case-insensitive lookup, file reads, and missing-path handling. The
+sparse in-memory FAT32 device remains available as a deterministic fallback.
 
 The media creation, OVMF discovery, serial synchronization, and shell probes are
 implemented by `tools/argus.py` instead of inline CI shell/Expect logic.
@@ -166,6 +175,8 @@ ls
 cat /README
 write /notes Rust owns this file
 rm /notes
+pci
+ahci
 disks
 fatinfo
 fatls
@@ -193,6 +204,8 @@ src/paging.c    kernel-owned identity page tables and memory attributes
 src/acpi.c      validated RSDP/XSDT/MADT discovery and IRQ overrides
 src/arch.c      GDT, IDT, TSS/IST, exception dispatch, and PIC masking
 src/apic.c      local APIC timer and I/O-APIC interrupt routing
+src/pci.c       PCI configuration-space discovery and AHCI-class lookup
+src/ahci.c      polling read-only SATA IDENTIFY/LBA48 DMA backend
 src/block.h     versioned C-owned block-device descriptor and read contract
 src/block.c     checked block layer and sparse FAT32 memory fixture
 src/serial.c    direct 16550/COM1 output and nonblocking input
@@ -215,12 +228,14 @@ src/gop.c       GOP discovery and raw framebuffer pixel operations
 src/console.c   Argus framebuffer terminal + UEFI text fallback
 src/font5x7.c   tiny built-in 5x7 terminal font
 src/cpu.S       CPU instructions, stack switch, and interrupt entry stubs
+assets/HELLO.TXT hardware-backed FAT32 smoke-test payload
 Makefile        freestanding PE/COFF build
 tools/argus.py  FAT image creation and interactive QEMU smoke runner
 docs/module-abi-v1.md ownership, layout, failure, and versioning contract
 docs/ramfs-abi-v1.md RAMFS ownership, limits, paths, status, and validation contract
 docs/block-device-abi-v1.md sector ownership, callback, and backend contract
 docs/fat32-abi-v1.md FAT32 layout, ownership, bounds, and failure contract
+docs/ahci-storage-v0.11.md PCI/AHCI ownership, DMA, limits, and recovery model
 ```
 
 ## Language policy
@@ -330,7 +345,7 @@ Implemented:
 - QEMU control-socket key injection that proves an IRQ-delivered shell command
 - Python negative boots for breakpoint, guard-page, and true double-fault diagnostics
 
-### Stage I — continued in v0.10: storage/files
+### Stage I — continued in v0.11: storage/files
 
 Implemented:
 
@@ -346,13 +361,21 @@ Implemented:
 - BPB, FAT-capacity, cluster, chain-cycle, path, and output-bound validation
 - `disks`, `fatinfo`, `fatls`, and `fatcat` native-shell commands
 - boot and QEMU tests that enumerate and read `/HELLO.TXT`
+- legacy PCI configuration-space discovery with AHCI class matching
+- PCI memory-space and bus-master enablement without clearing status bits
+- AHCI BIOS/OS ownership handoff, port discovery, engine reconfiguration, and
+  PMM-owned command-list/FIS/table/data memory
+- read-only ATA IDENTIFY DEVICE and one-sector LBA48 DMA reads
+- QEMU q35/SATA boot-media tests that prove Rust is parsing the hardware-backed disk
+- `pci` and `ahci` native-shell diagnostics
 
 Recommended next order:
 
-1. PCI discovery and a real AHCI/SATA read-only block backend
+1. protective-MBR/GPT partition discovery and filesystem block slices
 2. FAT32 subdirectory and long-filename support through ABI v2
-3. NVMe read-only block backend
-4. a write/cache layer only after power-loss and corruption semantics are designed
+3. AHCI interrupt completion, multi-sector PRDTs, recovery, and NCQ exploration
+4. NVMe read-only block backend
+5. a write/cache layer only after power-loss and corruption semantics are designed
 
 ### Stage J — processes
 Implement:

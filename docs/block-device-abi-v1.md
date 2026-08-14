@@ -24,9 +24,9 @@ capacity fail before the backend executes. The descriptor and context remain
 owned by C; a filesystem may borrow them only for the duration documented by its
 own ABI.
 
-## Current backend
+## Current backends
 
-ArgusOS v0.10 registers `memory.fat32`, a sparse in-memory fixture. It reports
+ArgusOS v0.10 introduced `memory.fat32`, a sparse in-memory fixture. It reports
 66,069 sectors while synthesizing only the sectors a valid minimal FAT32 volume
 needs: primary and backup boot sectors, FSInfo, the first FAT sector, one root
 directory sector, and one data sector. Unspecified sectors read as zero.
@@ -35,8 +35,13 @@ The fixture deliberately crosses the FAT32 minimum of 65,525 data clusters. It
 therefore tests a standards-shaped FAT32 geometry without embedding roughly
 32 MiB of static bytes in the EFI image.
 
-Future AHCI, NVMe, USB-mass-storage, and RAM-disk implementations should publish
-the same descriptor. Filesystem code must not depend on backend-specific context.
+ArgusOS v0.11 adds `ahci0`, backed by the first compatible SATA port on the first
+PCI AHCI controller. It publishes the same descriptor after IDENTIFY DEVICE has
+confirmed 512-byte logical sectors and LBA48 capacity. The test boot selects
+`ahci0`; initialization failure leaves `memory.fat32` selected as a fallback.
+
+Future NVMe, USB-mass-storage, and RAM-disk implementations should publish the
+same descriptor. Filesystem code must not depend on backend-specific context.
 
 ABI v1 is frozen; incompatible layout or callback changes require a new type and
 version.

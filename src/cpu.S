@@ -51,6 +51,29 @@ cpu_in8:
     movzx eax, al
     ret
 
+.globl cpu_out32
+cpu_out32:
+    # Microsoft x64 ABI: RCX = port, RDX = value
+    mov eax, edx
+    mov dx, cx
+    out dx, eax
+    ret
+
+.globl cpu_out16
+cpu_out16:
+    # Microsoft x64 ABI: RCX = port, RDX = value
+    mov eax, edx
+    mov dx, cx
+    out dx, ax
+    ret
+
+.globl cpu_in32
+cpu_in32:
+    # Microsoft x64 ABI: RCX = port
+    mov dx, cx
+    in eax, dx
+    ret
+
 .globl cpu_switch_stack_and_call
 cpu_switch_stack_and_call:
     # RCX = stack top, RDX = entry, R8 = boot information

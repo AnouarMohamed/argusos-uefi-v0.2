@@ -9,10 +9,10 @@ RUSTFLAGS = --target $(RUST_TARGET) --crate-type lib --emit=obj \
             --edition=2021 -D warnings -C panic=abort \
             -C opt-level=2 -C overflow-checks=yes
 
-OBJS = build/main.obj build/boot.obj build/kernel.obj build/acpi.obj build/apic.obj build/block.obj \
+OBJS = build/main.obj build/boot.obj build/kernel.obj build/acpi.obj build/ahci.obj build/apic.obj build/block.obj \
        build/arch.obj build/heap.obj build/input.obj build/kconsole.obj \
        build/kernel_shell.obj build/memory.obj build/module.obj build/paging.obj build/fat32.obj \
-       build/pmm.obj build/ps2.obj build/serial.obj \
+       build/pci.obj build/pmm.obj build/ps2.obj build/serial.obj \
        build/ramfs.obj build/rust_probe.obj build/rust_ramfs.obj build/rust_fat32.obj \
        build/uefi_memory.obj build/cpu.obj build/gop.obj build/console.obj build/font5x7.obj
 
@@ -27,10 +27,13 @@ build/main.obj: src/main.c src/efi.h src/boot.h src/console.h src/gop.h src/uefi
 build/boot.obj: src/boot.c src/boot.h src/boot_info.h src/efi.h src/console.h src/gop.h src/kernel.h src/serial.h src/uefi_memory.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-build/kernel.obj: src/kernel.c src/kernel.h src/acpi.h src/apic.h src/arch.h src/block.h src/boot_info.h src/fat32.h src/fat32_abi.h src/heap.h src/kconsole.h src/kernel_shell.h src/module.h src/module_abi.h src/paging.h src/pmm.h src/ramfs.h src/ramfs_abi.h | build
+build/kernel.obj: src/kernel.c src/kernel.h src/acpi.h src/ahci.h src/apic.h src/arch.h src/block.h src/boot_info.h src/fat32.h src/fat32_abi.h src/heap.h src/kconsole.h src/kernel_shell.h src/module.h src/module_abi.h src/paging.h src/pci.h src/pmm.h src/ramfs.h src/ramfs_abi.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/acpi.obj: src/acpi.c src/acpi.h src/boot_info.h | build
+	$(CLANG) $(CFLAGS) -c $< -o $@
+
+build/ahci.obj: src/ahci.c src/ahci.h src/block.h src/paging.h src/pci.h src/pmm.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/apic.obj: src/apic.c src/apic.h src/acpi.h | build
@@ -51,7 +54,7 @@ build/input.obj: src/input.c src/input.h src/acpi.h src/ps2.h src/serial.h | bui
 build/kconsole.obj: src/kconsole.c src/kconsole.h src/console.h src/serial.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-build/kernel_shell.obj: src/kernel_shell.c src/kernel_shell.h src/acpi.h src/apic.h src/block.h src/boot_info.h src/fat32.h src/fat32_abi.h src/heap.h src/input.h src/kconsole.h src/module.h src/module_abi.h src/paging.h src/pmm.h src/ramfs.h src/ramfs_abi.h | build
+build/kernel_shell.obj: src/kernel_shell.c src/kernel_shell.h src/acpi.h src/ahci.h src/apic.h src/block.h src/boot_info.h src/fat32.h src/fat32_abi.h src/heap.h src/input.h src/kconsole.h src/module.h src/module_abi.h src/paging.h src/pci.h src/pmm.h src/ramfs.h src/ramfs_abi.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/memory.obj: src/memory.c | build
@@ -76,6 +79,9 @@ build/rust_fat32.obj: src/rust_fat32.rs rust-toolchain.toml | build
 	$(RUSTC) $(RUSTFLAGS) --crate-name argus_rust_fat32 $< -o $@
 
 build/paging.obj: src/paging.c src/paging.h src/acpi.h src/boot_info.h src/pmm.h | build
+	$(CLANG) $(CFLAGS) -c $< -o $@
+
+build/pci.obj: src/pci.c src/pci.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/pmm.obj: src/pmm.c src/pmm.h src/boot_info.h src/uefi_memory.h src/efi.h | build

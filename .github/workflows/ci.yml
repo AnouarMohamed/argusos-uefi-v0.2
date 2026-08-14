@@ -44,6 +44,8 @@ jobs:
       - name: Validate EFI output
         run: |
           test -s build/BOOTX64.EFI
+          test -s build/pci.obj
+          test -s build/ahci.obj
           test -s build/rust_probe.obj
           test -s build/rust_ramfs.obj
           test -s build/rust_fat32.obj
@@ -111,7 +113,7 @@ jobs:
 
       - name: Validate smoke-test transcript
         run: |
-          grep -Fq "ArgusOS UEFI Study Monitor v0.10" qemu.log
+          grep -Fq "ArgusOS UEFI Study Monitor v0.11" qemu.log
           grep -Fq "ARGUS_KERNEL_ONLINE" qemu.log
           grep -Fq "BOOT_SERVICES_EXITED" qemu.log
           grep -Fq "PMM_SELF_TEST_PASS" qemu.log
@@ -124,6 +126,10 @@ jobs:
           grep -Fq "RUST_MODULE_SELF_TEST_PASS" qemu.log
           grep -Fq "RAMFS_ABI_V1_ONLINE" qemu.log
           grep -Fq "RUST_RAMFS_SELF_TEST_PASS" qemu.log
+          grep -Fq "PCI_DISCOVERY_ONLINE" qemu.log
+          grep -Fq "PCI_SELF_TEST_PASS" qemu.log
+          grep -Fq "AHCI_SATA_ONLINE" qemu.log
+          grep -Fq "AHCI_IDENTIFY_PASS" qemu.log
           grep -Fq "BLOCK_DEVICE_ONLINE" qemu.log
           grep -Fq "BLOCK_DEVICE_SELF_TEST_PASS" qemu.log
           grep -Fq "FAT32_ABI_V1_ONLINE" qemu.log
@@ -146,6 +152,9 @@ jobs:
           grep -Fq "RAMFS_REMOVE_OK" qemu.log
           grep -Fq "RAMFS error: not found" qemu.log
           grep -Fq "BLOCK_STATUS_OK" qemu.log
+          grep -Fq "Device: ahci0" qemu.log
+          grep -Fq "PCI_STATUS_OK" qemu.log
+          grep -Fq "AHCI_STATUS_OK" qemu.log
           grep -Fq "FAT32_STATUS_OK" qemu.log
           grep -Fq "FAT32_LIST_OK" qemu.log
           grep -Fq "ArgusOS FAT32 via Rust" qemu.log

@@ -17,5 +17,10 @@ int paging_init(
     const acpi_info_t *acpi,
     paging_info_t *paging_info
 );
+int paging_mark_mmio(
+    const paging_info_t *paging_info,
+    uint64_t physical,
+    uint64_t size
+);
 
 #endif

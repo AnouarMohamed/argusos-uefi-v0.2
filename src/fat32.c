@@ -68,24 +68,49 @@ int fat32_self_test(void) {
     argus_fat32_info_v1_t volume;
     int valid = fat32_info(&volume) == ARGUS_FAT32_OK &&
                 volume.bytes_per_sector == 512u &&
-                volume.sectors_per_cluster == 1u && volume.fat_count == 1u &&
-                volume.root_cluster == 2u && volume.total_sectors == 66069u &&
-                volume.data_clusters == 65525u &&
-                volume.first_data_sector == 544u;
+                volume.sectors_per_cluster != 0u &&
+                volume.sectors_per_cluster <= 128u &&
+                (volume.sectors_per_cluster &
+                 (volume.sectors_per_cluster - 1u)) == 0u &&
+                (volume.fat_count == 1u || volume.fat_count == 2u) &&
+                volume.root_cluster >= 2u && volume.total_sectors != 0u &&
+                volume.total_sectors <= mounted_device->sector_count &&
+                volume.data_clusters >= 65525u &&
+                volume.first_data_sector < volume.total_sectors;
 
     char path[ARGUS_FAT32_MAX_PATH + 1u];
     uint64_t path_length = 0;
     uint64_t file_size = 0;
     uint32_t attributes = 0;
-    valid = fat32_entry(0, path, sizeof(path), &path_length,
-                        &file_size, &attributes) == ARGUS_FAT32_OK &&
-            strings_equal(path, "/HELLO.TXT") && path_length == 10u &&
-            file_size == 23u && attributes == 0x20u && valid;
-    valid = fat32_entry(1u, path, sizeof(path), &path_length,
-                        &file_size, &attributes) == ARGUS_FAT32_NOT_FOUND && valid;
+    int found_hello = 0;
+    int reached_end = 0;
+    for (uint64_t index = 0; index < 128u; ++index) {
+        int32_t status = fat32_entry(
+            index,
+            path,
+            sizeof(path),
+            &path_length,
+            &file_size,
+            &attributes
+        );
+        if (status == ARGUS_FAT32_NOT_FOUND) {
+            reached_end = 1;
+            break;
+        }
+        if (status != ARGUS_FAT32_OK || path_length < 2u ||
+            path_length > ARGUS_FAT32_MAX_PATH) {
+            valid = 0;
+            break;
+        }
+        if (strings_equal(path, "/HELLO.TXT")) {
+            found_hello = path_length == 10u && file_size == 23u &&
+                          !(attributes & 0x10u);
+        }
+    }
+    valid = found_hello && reached_end && valid;
 
     static const uint8_t expected[] = "ArgusOS FAT32 via Rust\n";
-    uint8_t output[sizeof(expected) - 1u];
+    uint8_t output[sizeof(expected) - 1u] = {0};
     uint64_t output_length = 0;
     valid = fat32_read("/HELLO.TXT", output, 0, &output_length) ==
                 ARGUS_FAT32_BUFFER_TOO_SMALL &&

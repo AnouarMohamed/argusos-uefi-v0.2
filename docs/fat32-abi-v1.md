@@ -81,10 +81,13 @@ failures.
 | -5 | `ARGUS_FAT32_IO_ERROR` | The block callback failed. |
 | -6 | `ARGUS_FAT32_BUFFER_TOO_SMALL` | Output is smaller than the file. |
 
-Boot tests mount the sparse fixture, verify its geometry, enumerate
-`/HELLO.TXT`, exercise short-buffer reporting and case-insensitive lookup, compare
-all file bytes, and reject invalid, nested, and missing paths. QEMU repeats the
-listing and read through native shell commands.
+Boot tests mount either registered block backend, validate its geometry, find
+`/HELLO.TXT` without relying on directory order, exercise short-buffer reporting
+and case-insensitive lookup, compare all file bytes, and reject invalid, nested,
+and missing paths. QEMU requires the selected device to be `ahci0`, so its shell
+listing and read prove that the Rust parser consumed sectors delivered by the
+post-firmware AHCI driver. The sparse fixture remains a fallback for machines
+without supported SATA hardware.
 
 ABI v1 is frozen. Long filenames, subdirectories, or a larger read model should
 arrive through an additive new ABI rather than changing this descriptor.

@@ -18,6 +18,8 @@ from typing import NoReturn, Sequence
 
 
 MIB = 1024 * 1024
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+FAT32_PROBE_FILE = PROJECT_ROOT / "assets" / "HELLO.TXT"
 BOOT_MARKERS = (
     b"ARGUS_KERNEL_ONLINE",
     b"BOOT_SERVICES_EXITED",
@@ -31,6 +33,10 @@ BOOT_MARKERS = (
     b"RUST_MODULE_SELF_TEST_PASS",
     b"RAMFS_ABI_V1_ONLINE",
     b"RUST_RAMFS_SELF_TEST_PASS",
+    b"PCI_DISCOVERY_ONLINE",
+    b"PCI_SELF_TEST_PASS",
+    b"AHCI_SATA_ONLINE",
+    b"AHCI_IDENTIFY_PASS",
     b"BLOCK_DEVICE_ONLINE",
     b"BLOCK_DEVICE_SELF_TEST_PASS",
     b"FAT32_ABI_V1_ONLINE",
@@ -54,6 +60,8 @@ SHELL_PROBES = (
     (b"cat /qemu.txt\r", b"Rust RAMFS round trip"),
     (b"rm /qemu.txt\r", b"RAMFS_REMOVE_OK"),
     (b"cat /qemu.txt\r", b"RAMFS error: not found"),
+    (b"pci\r", b"PCI_STATUS_OK"),
+    (b"ahci\r", b"AHCI_STATUS_OK"),
     (b"disks\r", b"BLOCK_STATUS_OK"),
     (b"fatinfo\r", b"FAT32_STATUS_OK"),
     (b"fatls\r", b"FAT32_LIST_OK"),
@@ -125,6 +133,8 @@ def create_fat_image(efi_binary: Path, output: Path, size_mib: int) -> None:
         raise ToolError(f"EFI binary not found: {efi_binary}")
     if size_mib < 34:
         raise ToolError("FAT32 test images must be at least 34 MiB")
+    if not FAT32_PROBE_FILE.is_file():
+        raise ToolError(f"FAT32 probe file not found: {FAT32_PROBE_FILE}")
 
     mkfs_fat = require_executable("mkfs.fat")
     mmd = require_executable("mmd")
@@ -139,6 +149,9 @@ def create_fat_image(efi_binary: Path, output: Path, size_mib: int) -> None:
     run_checked((mmd, "-i", str(output), "::/EFI/BOOT"))
     run_checked(
         (mcopy, "-i", str(output), str(efi_binary), "::/EFI/BOOT/BOOTX64.EFI")
+    )
+    run_checked(
+        (mcopy, "-i", str(output), str(FAT32_PROBE_FILE), "::/HELLO.TXT")
     )
 
 
@@ -297,7 +310,7 @@ def qemu_command(
         "-serial",
         "stdio",
         "-machine",
-        "accel=tcg",
+        "q35,accel=tcg",
         "-m",
         memory,
         "-drive",
@@ -305,7 +318,7 @@ def qemu_command(
         "-drive",
         f"if=pflash,format=raw,file={ovmf_vars}",
         "-drive",
-        f"if=virtio,format=raw,file={image}",
+        f"if=ide,format=raw,file={image}",
         "-no-reboot",
         "-monitor",
         "none",

@@ -132,6 +132,8 @@ static const argus_block_device_v1_t fixture_device = {
     fixture_read
 };
 
+static const argus_block_device_v1_t *default_device;
+
 static int valid_name(const char name[ARGUS_BLOCK_NAME_CAPACITY]) {
     for (unsigned i = 0; i < ARGUS_BLOCK_NAME_CAPACITY; ++i) {
         uint8_t character = (uint8_t)name[i];
@@ -174,10 +176,13 @@ int32_t block_read(
     );
 }
 
-int block_init(void) { return block_device_valid(&fixture_device); }
+int block_init(void) {
+    default_device = block_device_valid(&fixture_device) ? &fixture_device : 0;
+    return default_device != 0;
+}
 
 int block_self_test(void) {
-    uint8_t sector[FIXTURE_SECTOR_SIZE];
+    uint8_t sector[FIXTURE_SECTOR_SIZE] = {0};
     int valid = block_read(&fixture_device, 0, 1u, sector, sizeof(sector)) ==
                     ARGUS_BLOCK_OK &&
                 sector[510] == 0x55u && sector[511] == 0xAAu;
@@ -190,9 +195,26 @@ int block_self_test(void) {
                        sector, sizeof(sector)) == ARGUS_BLOCK_OK && valid;
     for (unsigned i = 0; i < sizeof(fixture_file) - 1u; ++i)
         valid = sector[i] == fixture_file[i] && valid;
+
+    const argus_block_device_v1_t *device = default_device;
+    valid = block_device_valid(device) && valid;
+    if (!device) return 0;
+    valid = block_read(device, 0, 1u, sector, sizeof(sector)) ==
+                ARGUS_BLOCK_OK &&
+            sector[510] == 0x55u && sector[511] == 0xAAu && valid;
+    valid = block_read(device, device->sector_count, 1u,
+                       sector, sizeof(sector)) == ARGUS_BLOCK_RANGE && valid;
+    valid = block_read(device, 0, 1u, sector, sizeof(sector) - 1u) ==
+                ARGUS_BLOCK_BUFFER_TOO_SMALL && valid;
     return valid;
 }
 
+int block_use_device(const argus_block_device_v1_t *device) {
+    if (!block_device_valid(device)) return 0;
+    default_device = device;
+    return 1;
+}
+
 const argus_block_device_v1_t *block_default_device(void) {
-    return block_device_valid(&fixture_device) ? &fixture_device : 0;
+    return block_device_valid(default_device) ? default_device : 0;
 }

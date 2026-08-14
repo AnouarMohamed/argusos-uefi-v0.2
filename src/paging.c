@@ -188,3 +188,44 @@ int paging_init(
     paging_info->nx_enabled = nx;
     return 1;
 }
+
+int paging_mark_mmio(
+    const paging_info_t *paging_info,
+    uint64_t physical,
+    uint64_t size
+) {
+    if (!paging_info || !paging_info->root_table || !size ||
+        physical >= paging_info->mapped_bytes ||
+        size - 1u > UINT64_MAX - physical ||
+        physical + size > paging_info->mapped_bytes)
+        return 0;
+
+    uint64_t first = physical & ~(LARGE_PAGE_SIZE - 1u);
+    uint64_t last = (physical + size - 1u) & ~(LARGE_PAGE_SIZE - 1u);
+    uint64_t *pml4 = (uint64_t *)(uintptr_t)paging_info->root_table;
+    for (uint64_t address = first;; address += LARGE_PAGE_SIZE) {
+        unsigned pml4_index = (unsigned)((address >> 39) & 0x1FFu);
+        unsigned pdpt_index = (unsigned)((address >> 30) & 0x1FFu);
+        unsigned pd_index = (unsigned)((address >> 21) & 0x1FFu);
+        if (!(pml4[pml4_index] & PAGE_PRESENT)) return 0;
+        uint64_t *pdpt = (uint64_t *)(uintptr_t)
+            (pml4[pml4_index] & PAGE_ADDRESS_MASK);
+        if (!(pdpt[pdpt_index] & PAGE_PRESENT)) return 0;
+        uint64_t *pd = (uint64_t *)(uintptr_t)
+            (pdpt[pdpt_index] & PAGE_ADDRESS_MASK);
+        if (!(pd[pd_index] & PAGE_PRESENT)) return 0;
+
+        if (pd[pd_index] & PAGE_LARGE) {
+            pd[pd_index] |= PAGE_PCD | PAGE_PWT;
+        } else {
+            uint64_t *pt = (uint64_t *)(uintptr_t)
+                (pd[pd_index] & PAGE_ADDRESS_MASK);
+            for (unsigned index = 0; index < 512u; ++index)
+                if (pt[index] & PAGE_PRESENT)
+                    pt[index] |= PAGE_PCD | PAGE_PWT;
+        }
+        if (address == last) break;
+    }
+    cpu_load_cr3(paging_info->root_table);
+    return 1;
+}

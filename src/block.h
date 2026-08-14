@@ -47,6 +47,7 @@ int32_t block_read(
     uint8_t *output,
     uint64_t output_capacity
 );
+int block_use_device(const argus_block_device_v1_t *device);
 const argus_block_device_v1_t *block_default_device(void);
 
 #endif
