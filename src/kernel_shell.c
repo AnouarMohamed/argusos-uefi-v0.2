@@ -2,6 +2,7 @@
 #include "apic.h"
 #include "ahci.h"
 #include "block.h"
+#include "desktop.h"
 #include "fat32.h"
 #include "heap.h"
 #include "input.h"
@@ -66,6 +67,7 @@ static void print_help(void) {
     kconsole_write("  ticks        local-APIC timer ticks\n");
     kconsole_write("  input        native input backends\n");
     kconsole_write("  irqtest      confirm IRQ keyboard command delivery\n");
+    kconsole_write("  desktop      redraw the framebuffer desktop\n");
     kconsole_write("  clear        clear framebuffer/terminal\n");
     kconsole_write("  echo TEXT    print text\n");
     kconsole_write("  fault        trigger breakpoint diagnostics\n");
@@ -77,7 +79,7 @@ static void print_status(
     const acpi_info_t *acpi,
     const paging_info_t *paging
 ) {
-    kconsole_write("\nArgusOS kernel v0.11\n");
+    kconsole_write("\nArgusOS kernel v0.12\n");
     kconsole_write("Boot Services: exited\nCPUs: ");
     kconsole_write_dec(acpi->enabled_cpu_count);
     kconsole_write("\nCR3: ");
@@ -429,6 +431,9 @@ static void execute_command(
     else if (strings_equal(line, "irqtest"))
         kconsole_write(input_keyboard_uses_irq()
             ? "PS2_IRQ_INPUT_OK\n" : "PS2_IRQ_INPUT_UNAVAILABLE\n");
+    else if (strings_equal(line, "desktop"))
+        kconsole_write(desktop_redraw()
+            ? "DESKTOP_UI_REDRAWN\n" : "DESKTOP_UI_UNAVAILABLE\n");
     else if (strings_equal(line, "clear")) kconsole_clear();
     else if (starts_with(line, "echo ")) { kconsole_write(line + 5); kconsole_write("\n"); }
     else if (strings_equal(line, "fault")) cpu_trigger_breakpoint();
@@ -447,6 +452,9 @@ void kernel_shell_run(
     char line[128];
     unsigned used = 0;
     input_init(acpi);
+
+    kconsole_write(desktop_init()
+        ? "DESKTOP_UI_ONLINE\n" : "DESKTOP_UI_UNAVAILABLE\n");
 
     kconsole_write("Native input initialized.\n");
     kconsole_write(input_keyboard_uses_irq()

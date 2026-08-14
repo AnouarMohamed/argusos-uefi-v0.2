@@ -1,0 +1,188 @@
+---
+name: Argus 9OS
+description: A quiet, handmade workstation interface for ArgusOS.
+colors:
+  field-olive: "#4c5148"
+  field-olive-dark: "#41463f"
+  warm-chrome: "#b8b4a5"
+  chrome-highlight: "#d3d0c2"
+  chrome-shadow: "#6e6c64"
+  terminal-ink: "#171a17"
+  terminal-text: "#c9c8b5"
+  slate-title: "#4e5869"
+  oxblood-active: "#795a58"
+  near-ink: "#242724"
+typography:
+  title:
+    fontFamily: "Argus 5x7 Bitmap, monospace"
+    fontSize: "14px"
+    fontWeight: 700
+    lineHeight: 1
+    letterSpacing: "1px"
+  body:
+    fontFamily: "Argus 5x7 Bitmap, monospace"
+    fontSize: "14px"
+    fontWeight: 400
+    lineHeight: 1.28
+    letterSpacing: "normal"
+  label:
+    fontFamily: "Argus 5x7 Bitmap, monospace"
+    fontSize: "12px"
+    fontWeight: 700
+    lineHeight: 1
+    letterSpacing: "1px"
+rounded:
+  square: "0px"
+spacing:
+  hairline: "1px"
+  xs: "2px"
+  sm: "4px"
+  md: "8px"
+  lg: "12px"
+components:
+  panel-button:
+    backgroundColor: "{colors.warm-chrome}"
+    textColor: "{colors.near-ink}"
+    typography: "{typography.label}"
+    rounded: "{rounded.square}"
+    padding: "4px 8px"
+  terminal-window:
+    backgroundColor: "{colors.terminal-ink}"
+    textColor: "{colors.terminal-text}"
+    typography: "{typography.body}"
+    rounded: "{rounded.square}"
+    padding: "8px"
+---
+
+# Design System: Argus 9OS
+
+## 1. Overview
+
+**Creative North Star: "The Quiet Workstation"**
+
+Argus 9OS should feel like a maintained computer in a dim room around the turn
+of the millennium: practical, slightly severe, and built by a person who cares
+more about legibility than fashion. The visual language combines old Linux
+desktop economy, early imageboard density, and tactile one-pixel system chrome.
+
+It explicitly rejects glossy Windows XP imitation, literal 4chan branding,
+neon hacker theater, glass, gradients, rounded cards, and decorative animation.
+
+**Key Characteristics:**
+
+- Muted olive field with warm gray system chrome
+- Square corners and crisp one-pixel bevels
+- Small bitmap type with compact, keyboard-first labels
+- One desaturated title color and one rare oxblood state color
+- Real system status in place of decorative widgets
+
+## 2. Colors
+
+The palette is low-chroma and warm enough to avoid modern blue-black developer
+tool styling while preserving clear terminal contrast.
+
+### Primary
+
+- **Dusty Workbench Olive** (#4c5148): desktop field and the dominant visual atmosphere.
+- **Aged System Chrome** (#b8b4a5): panels, controls, and window frames.
+
+### Secondary
+
+- **Faded Slate Title** (#4e5869): active title bars and keyboard focus.
+- **Quiet Oxblood** (#795a58): rare active or warning state, never decoration.
+
+### Neutral
+
+- **Terminal Ink** (#171a17): terminal and deep content surfaces.
+- **Phosphor Paper** (#c9c8b5): terminal text and high-contrast labels.
+- **Chrome Highlight** (#d3d0c2): top and left bevel edges.
+- **Chrome Shadow** (#6e6c64): bottom and right bevel edges.
+- **Near Ink** (#242724): chrome text and icons.
+
+### Named Rules
+
+**The Dust Rule.** No fully saturated color appears anywhere. Accent color stays
+under ten percent of a screen and always communicates state.
+
+## 3. Typography
+
+**Display Font:** Argus 5x7 Bitmap (monospace fallback)
+**Body Font:** Argus 5x7 Bitmap (monospace fallback)
+**Label/Mono Font:** Argus 5x7 Bitmap
+
+**Character:** One pixel vocabulary serves chrome, status, and terminal output.
+Two-times integer scaling preserves hard edges on larger framebuffers.
+
+### Hierarchy
+
+- **Title** (700, 14px, 1): window titles and the Argus launcher.
+- **Body** (400, 14px, 1.28): terminal text, capped by the terminal viewport.
+- **Label** (700, 12px, 1px tracking): icons, panel status, and short controls.
+
+### Named Rules
+
+**The Integer Pixel Rule.** Glyphs are scaled only by whole numbers and never
+smoothed, stretched, or shadowed.
+
+## 4. Elevation
+
+There are no blurred shadows. Depth comes from one-pixel light and dark edges,
+as it did in classic desktop chrome. Active controls invert those edges to look
+physically pressed.
+
+### Named Rules
+
+**The One-Pixel Bevel Rule.** Every raised or recessed edge uses exactly one
+highlight and one shadow line. Never stack ornamental borders.
+
+## 5. Components
+
+### Buttons
+
+- **Shape:** square (0px radius), compact and text-led.
+- **Primary:** Aged System Chrome with Near Ink and 4px by 8px padding.
+- **Hover / Focus:** Faded Slate outline plus a textual focus cue.
+- **Active:** inverted one-pixel bevel, no scaling animation.
+
+### Cards / Containers
+
+- **Corner Style:** square (0px radius).
+- **Background:** use a single field or chrome surface.
+- **Shadow Strategy:** no shadow; one-pixel structural bevel only.
+- **Border:** full perimeter, never an accent stripe.
+- **Internal Padding:** 8px or 12px according to density.
+
+### Inputs / Fields
+
+- **Style:** Terminal Ink field, Phosphor Paper text, one-pixel recessed frame.
+- **Focus:** visible Faded Slate outline and text cursor.
+- **Error / Disabled:** pair color with explicit text.
+
+### Navigation
+
+The bottom panel contains one Argus launcher, a flat task label, and terse machine
+status. Active items use an inverted bevel. The desktop remains keyboard-first.
+
+### Terminal Window
+
+A single large terminal is the first real application surface. Its title bar
+states that it is a kernel console, its contents are real serial-mirrored output,
+and its frame leaves enough field visible to read as a desktop.
+
+## 6. Do's and Don'ts
+
+### Do:
+
+- **Do** use #4c5148 as the dominant field and #b8b4a5 for system chrome.
+- **Do** use square corners and exact one-pixel highlight/shadow edges.
+- **Do** show real keyboard, storage, and shell state in terse language.
+- **Do** keep the terminal readable with #c9c8b5 on #171a17.
+- **Do** preserve keyboard and serial access for every important action.
+
+### Don't:
+
+- **Don't** make ArgusOS a glossy Windows XP clone or a literal 4chan clone.
+- **Don't** use copied Microsoft or imageboard artwork, icons, trademarks, or layout.
+- **Don't** use neon cyberpunk accents, gradients, glassmorphism, or rounded cards.
+- **Don't** use a colored side stripe on any panel or item.
+- **Don't** animate anything that does not communicate a state change.

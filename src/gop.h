@@ -23,5 +23,13 @@ void gop_putpixel(uint32_t x, uint32_t y, uint32_t packed);
 void gop_fill(uint32_t packed);
 void gop_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t packed);
 void gop_scroll_up(uint32_t pixels, uint32_t fill_color);
+void gop_scroll_rect_up(
+    uint32_t x,
+    uint32_t y,
+    uint32_t w,
+    uint32_t h,
+    uint32_t pixels,
+    uint32_t fill_color
+);
 
 #endif

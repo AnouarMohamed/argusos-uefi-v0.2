@@ -11,6 +11,10 @@ static uint32_t cursor_y;
 static uint32_t scale;
 static uint32_t cell_w;
 static uint32_t cell_h;
+static uint32_t region_x;
+static uint32_t region_y;
+static uint32_t region_w;
+static uint32_t region_h;
 
 static const uint8_t palette[16][3] = {
     {0,0,0},       {0,0,170},     {0,170,0},     {0,170,170},
@@ -44,14 +48,13 @@ static void draw_glyph(char c, uint32_t x, uint32_t y) {
 }
 
 static void ensure_cursor_visible(void) {
-    const argus_gop_t *g = gop_info();
-    if (cursor_x + cell_w > g->width) {
-        cursor_x = 0;
+    if (cursor_x + cell_w > region_x + region_w) {
+        cursor_x = region_x;
         cursor_y += cell_h;
     }
-    if (cursor_y + cell_h > g->height) {
-        gop_scroll_up(cell_h, bg);
-        cursor_y = g->height - cell_h;
+    if (cursor_y + cell_h > region_y + region_h) {
+        gop_scroll_rect_up(region_x, region_y, region_w, region_h, cell_h, bg);
+        cursor_y = region_y + region_h - cell_h;
     }
 }
 
@@ -68,7 +71,12 @@ int console_init(EFI_SYSTEM_TABLE *st) {
         framebuffer_mode = 0;
         return 0;
     }
-    cursor_x = cursor_y = 0;
+    region_x = 0;
+    region_y = 0;
+    region_w = g->width;
+    region_h = g->height;
+    cursor_x = region_x;
+    cursor_y = region_y;
     bg = gop_rgb(0, 0, 0);
     console_set_color(10);
     gop_fill(bg);
@@ -87,21 +95,21 @@ void console_set_color(unsigned index) {
 }
 
 void console_clear(void) {
-    cursor_x = cursor_y = 0;
+    cursor_x = region_x;
+    cursor_y = region_y;
     if (!framebuffer_mode) {
         if (fallback_out) fallback_out->ClearScreen(fallback_out);
         return;
     }
-    gop_fill(bg);
+    gop_fill_rect(region_x, region_y, region_w, region_h, bg);
 }
 
 void console_putc(char c) {
     if (!framebuffer_mode) { fallback_char(c); return; }
 
-    const argus_gop_t *g = gop_info();
-    if (c == '\r') { cursor_x = 0; return; }
+    if (c == '\r') { cursor_x = region_x; return; }
     if (c == '\n') {
-        cursor_x = 0;
+        cursor_x = region_x;
         cursor_y += cell_h;
         ensure_cursor_visible();
         return;
@@ -111,11 +119,11 @@ void console_putc(char c) {
         return;
     }
     if (c == '\b') {
-        if (cursor_x >= cell_w) cursor_x -= cell_w;
-        else if (cursor_y >= cell_h) {
+        if (cursor_x >= region_x + cell_w) cursor_x -= cell_w;
+        else if (cursor_y >= region_y + cell_h) {
             cursor_y -= cell_h;
-            cursor_x = (g->width / cell_w) * cell_w;
-            if (cursor_x >= cell_w) cursor_x -= cell_w;
+            cursor_x = region_x + (region_w / cell_w) * cell_w;
+            if (cursor_x >= region_x + cell_w) cursor_x -= cell_w;
         }
         gop_fill_rect(cursor_x, cursor_y, cell_w, cell_h, bg);
         return;
@@ -136,4 +144,34 @@ void console_write16(const CHAR16 *s) {
         CHAR16 c = *s++;
         console_putc(c < 128 ? (char)c : '?');
     }
+}
+
+int console_set_region(
+    uint32_t x,
+    uint32_t y,
+    uint32_t width,
+    uint32_t height,
+    uint8_t foreground_r,
+    uint8_t foreground_g,
+    uint8_t foreground_b,
+    uint8_t background_r,
+    uint8_t background_g,
+    uint8_t background_b
+) {
+    if (!framebuffer_mode) return 0;
+    const argus_gop_t *g = gop_info();
+    if (x >= g->width || y >= g->height ||
+        width > g->width - x || height > g->height - y ||
+        width < cell_w || height < cell_h)
+        return 0;
+
+    region_x = x;
+    region_y = y;
+    region_w = width - width % cell_w;
+    region_h = height - height % cell_h;
+    if (region_w < cell_w || region_h < cell_h) return 0;
+    fg = gop_rgb(foreground_r, foreground_g, foreground_b);
+    bg = gop_rgb(background_r, background_g, background_b);
+    console_clear();
+    return 1;
 }

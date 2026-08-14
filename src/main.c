@@ -2,9 +2,10 @@
 #include "boot.h"
 #include "console.h"
 #include "gop.h"
+#include "serial.h"
 #include "uefi_memory.h"
 
-#define ARGUS_VERSION "0.11"
+#define ARGUS_VERSION "0.12"
 
 static EFI_SYSTEM_TABLE *ST;
 static EFI_SIMPLE_TEXT_INPUT_PROTOCOL *IN;
@@ -16,11 +17,23 @@ extern void cpu_vendor(char out[13]);
 extern uint64_t cpu_read_tsc(void);
 extern void cpu_cpuid1(uint32_t *ecx_out, uint32_t *edx_out);
 
-static void print16(CHAR16 *s) { console_write16(s); }
+static void print16(CHAR16 *s) {
+    console_write16(s);
+    while (*s) {
+        CHAR16 c = *s++;
+        serial_putc(c < 128 ? (char)c : '?');
+    }
+}
 
-static void print(const char *s) { console_write(s); }
+static void print(const char *s) {
+    console_write(s);
+    serial_write(s);
+}
 
-static void putc_ascii(char c) { console_putc(c); }
+static void putc_ascii(char c) {
+    console_putc(c);
+    serial_putc(c);
+}
 
 static int streq(const char *a, const char *b) {
     while (*a && *b && *a == *b) { ++a; ++b; }
@@ -68,17 +81,18 @@ static int parse_u32(const char *s, uint32_t *out) {
 static void read_line(char *dst, unsigned cap) {
     unsigned n = 0;
     for (;;) {
+        int serial_value = serial_getc_nonblocking();
         EFI_INPUT_KEY key;
-        EFI_STATUS status = IN->ReadKeyStroke(IN, &key);
-        if (status != EFI_SUCCESS) {
-            EFI_EVENT ev = IN->WaitForKey;
-            UINTN index = 0;
-            ST->BootServices->WaitForEvent(1, &ev, &index);
+        EFI_STATUS status = serial_value < 0
+            ? IN->ReadKeyStroke(IN, &key)
+            : EFI_SUCCESS;
+        if (serial_value < 0 && status != EFI_SUCCESS) {
+            ST->BootServices->Stall(1000u);
             continue;
         }
 
-        CHAR16 ch = key.UnicodeChar;
-        if (ch == '\r') {
+        uint16_t ch = serial_value >= 0 ? (uint8_t)serial_value : key.UnicodeChar;
+        if (ch == '\r' || ch == '\n') {
             dst[n] = 0;
             return;
         }
@@ -272,13 +286,15 @@ static void about(void) {
     print("The post-firmware kernel provides native serial/PS2 input and a heap.\n");
     print("Python owns host tests; bounded no_std Rust components use checked ABIs.\n");
     print("Allocator invariants, guarded stacks, and IRQ input are enforced.\n");
-    print("Stage I now includes PCI, AHCI disk reads, and a bounded Rust FAT32 reader.\n\n");
+    print("Stage K now includes the first static Argus 9OS desktop prototype.\n\n");
 }
 
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
     ST = system_table;
     IN = ST->ConIn;
     IMAGE = image;
+
+    serial_init();
 
     EFI_STATUS watchdog_status = EFI_SUCCESS;
     if (ST->BootServices->SetWatchdogTimer)

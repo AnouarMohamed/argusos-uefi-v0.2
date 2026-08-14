@@ -44,11 +44,13 @@ BOOT_MARKERS = (
     b"GDT_IDT_ONLINE",
     b"DOUBLE_FAULT_IST_ONLINE",
     b"APIC_TIMER_TICK",
+    b"DESKTOP_UI_ONLINE",
     b"PS2_IRQ_ONLINE",
     b"KERNEL_SHELL_READY",
 )
 SHELL_PROBES = (
     (b"status\r", b"STATUS_OK"),
+    (b"desktop\r", b"DESKTOP_UI_REDRAWN"),
     (b"modules\r", b"MODULES_OK"),
     (b"alloc 4096\r", b"ALLOC_OK"),
     (b"memtest\r", b"ALLOCATOR_HARDENING_PASS"),
@@ -109,6 +111,13 @@ OVMF_PAIRS = (
     ("/usr/share/edk2/x64/OVMF_CODE.fd", "/usr/share/edk2/x64/OVMF_VARS.fd"),
 )
 
+DESKTOP_PALETTE = {
+    "field olive": bytes((0x4C, 0x51, 0x48)),
+    "warm chrome": bytes((0xB8, 0xB4, 0xA5)),
+    "terminal ink": bytes((0x17, 0x1A, 0x17)),
+    "slate title": bytes((0x4E, 0x58, 0x69)),
+}
+
 
 class ToolError(RuntimeError):
     """An actionable host-tool or smoke-test failure."""
@@ -126,6 +135,15 @@ def run_checked(command: Sequence[str]) -> None:
         subprocess.run(command, check=True)
     except subprocess.CalledProcessError as error:
         raise ToolError(f"command failed ({error.returncode}): {' '.join(command)}") from error
+
+
+def verify_desktop_capture(path: Path) -> None:
+    capture = path.read_bytes()
+    if not capture.startswith(b"P6\n"):
+        raise ToolError("QEMU framebuffer capture is not a binary PPM image")
+    for name, rgb in DESKTOP_PALETTE.items():
+        if rgb not in capture:
+            raise ToolError(f"framebuffer capture is missing desktop color: {name}")
 
 
 def create_fat_image(efi_binary: Path, output: Path, size_mib: int) -> None:
@@ -319,6 +337,8 @@ def qemu_command(
         f"if=pflash,format=raw,file={ovmf_vars}",
         "-drive",
         f"if=ide,format=raw,file={image}",
+        "-vga",
+        "std",
         "-no-reboot",
         "-monitor",
         "none",
@@ -354,6 +374,12 @@ def run_smoke(args: argparse.Namespace) -> None:
             session.expect(marker, args.timeout)
         session.expect(b"argus-kernel> ", args.timeout)
 
+        args.screenshot.parent.mkdir(parents=True, exist_ok=True)
+        qmp.execute("screendump", {"filename": str(args.screenshot.resolve())})
+        if not args.screenshot.is_file():
+            raise ToolError("QEMU did not create the framebuffer screenshot")
+        verify_desktop_capture(args.screenshot)
+
         for command, marker in SHELL_PROBES:
             session.send(command)
             session.expect(marker, args.timeout)
@@ -375,7 +401,10 @@ def run_smoke(args: argparse.Namespace) -> None:
                 args.log.write_bytes(session.transcript)
         temporary.cleanup()
 
-    print(f"\nArgusOS smoke test passed; transcript: {args.log}")
+    print(
+        f"\nArgusOS smoke test passed; transcript: {args.log}; "
+        f"framebuffer: {args.screenshot}"
+    )
 
 
 def run_fault(args: argparse.Namespace) -> None:
@@ -423,6 +452,12 @@ def build_parser() -> argparse.ArgumentParser:
     smoke.add_argument("--image-size", type=int, default=64, help="FAT image size in MiB")
     smoke.add_argument("--timeout", type=float, default=25.0, help="per-marker timeout")
     smoke.add_argument("--log", type=Path, default=Path("build/qemu-smoke.log"))
+    smoke.add_argument(
+        "--screenshot",
+        type=Path,
+        default=Path("build/qemu-desktop.ppm"),
+        help="framebuffer capture after the kernel shell becomes ready",
+    )
     smoke.add_argument("--qemu", default="qemu-system-x86_64")
     smoke.add_argument("--ovmf-code", type=Path)
     smoke.add_argument("--ovmf-vars", type=Path)

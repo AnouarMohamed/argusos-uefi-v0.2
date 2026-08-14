@@ -126,14 +126,31 @@ void gop_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t pack
 }
 
 void gop_scroll_up(uint32_t pixels, uint32_t fill_color) {
-    if (!G.usable || pixels == 0) return;
-    if (pixels >= G.height) { gop_fill(fill_color); return; }
+    gop_scroll_rect_up(0, 0, G.width, G.height, pixels, fill_color);
+}
 
-    uint32_t rows = G.height - pixels;
-    for (uint32_t y = 0; y < rows; ++y) {
-        volatile uint32_t *dst = G.fb + (uint64_t)y * G.pitch_pixels;
-        volatile uint32_t *src = G.fb + (uint64_t)(y + pixels) * G.pitch_pixels;
-        for (uint32_t x = 0; x < G.width; ++x) dst[x] = src[x];
+void gop_scroll_rect_up(
+    uint32_t x,
+    uint32_t y,
+    uint32_t w,
+    uint32_t h,
+    uint32_t pixels,
+    uint32_t fill_color
+) {
+    if (!G.usable || !pixels || x >= G.width || y >= G.height) return;
+    if (w > G.width - x) w = G.width - x;
+    if (h > G.height - y) h = G.height - y;
+    if (!w || !h) return;
+    if (pixels >= h) {
+        gop_fill_rect(x, y, w, h, fill_color);
+        return;
     }
-    gop_fill_rect(0, rows, G.width, pixels, fill_color);
+
+    uint32_t rows = h - pixels;
+    for (uint32_t yy = 0; yy < rows; ++yy) {
+        volatile uint32_t *dst = G.fb + (uint64_t)(y + yy) * G.pitch_pixels + x;
+        volatile uint32_t *src = G.fb + (uint64_t)(y + yy + pixels) * G.pitch_pixels + x;
+        for (uint32_t xx = 0; xx < w; ++xx) dst[xx] = src[xx];
+    }
+    gop_fill_rect(x, y + rows, w, pixels, fill_color);
 }

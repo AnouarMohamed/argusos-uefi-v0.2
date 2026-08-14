@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-14T00:00:00Z",
+  "title": "Design System: Argus 9OS",
+  "extensions": {
+    "colorMeta": {
+      "field-olive": { "role": "primary", "displayName": "Dusty Workbench Olive", "canonical": "#4c5148", "tonalRamp": ["#252824", "#353832", "#4c5148", "#62685d", "#7c8276", "#989d92", "#b7bbb2", "#daddd7"] },
+      "warm-chrome": { "role": "neutral", "displayName": "Aged System Chrome", "canonical": "#b8b4a5", "tonalRamp": ["#292823", "#413f38", "#5d5a50", "#79766a", "#969286", "#b8b4a5", "#d2cfc4", "#ebe9e2"] },
+      "slate-title": { "role": "secondary", "displayName": "Faded Slate Title", "canonical": "#4e5869", "tonalRamp": ["#242932", "#343b47", "#4e5869", "#667185", "#818b9d", "#9fa7b6", "#bec4ce", "#dde0e5"] },
+      "terminal-ink": { "role": "neutral", "displayName": "Terminal Ink", "canonical": "#171a17", "tonalRamp": ["#171a17", "#282c28", "#3f443f", "#5a605a", "#777d77", "#969b96", "#b7bbb7", "#d9dbd9"] }
+    },
+    "typographyMeta": {
+      "title": { "displayName": "Bitmap Title", "purpose": "Window titles and launcher labels." },
+      "body": { "displayName": "Bitmap Body", "purpose": "Terminal output and system copy." },
+      "label": { "displayName": "Bitmap Label", "purpose": "Compact desktop and panel labels." }
+    },
+    "shadows": [],
+    "motion": [],
+    "breakpoints": []
+  },
+  "components": [
+    {
+      "name": "Panel Button",
+      "kind": "button",
+      "refersTo": "panel-button",
+      "description": "Square raised launcher button with an inverted pressed state.",
+      "html": "<button class=\"ds-panel-button\">[A] ARGUS</button>",
+      "css": ".ds-panel-button { background:#b8b4a5; color:#242724; padding:4px 8px; border:1px solid #6e6c64; border-top-color:#d3d0c2; border-left-color:#d3d0c2; border-radius:0; font:700 12px monospace; } .ds-panel-button:hover,.ds-panel-button:focus-visible { outline:1px solid #4e5869; outline-offset:1px; } .ds-panel-button:active { border-color:#d3d0c2; border-top-color:#6e6c64; border-left-color:#6e6c64; }"
+    },
+    {
+      "name": "Terminal Window",
+      "kind": "custom",
+      "refersTo": "terminal-window",
+      "description": "The real kernel console inside classic one-pixel chrome.",
+      "html": "<section class=\"ds-terminal\"><header>ARGUS KERNEL CONSOLE // TTY0</header><pre>argus-kernel&gt; _</pre></section>",
+      "css": ".ds-terminal { width:420px; border:1px solid #6e6c64; border-top-color:#d3d0c2; border-left-color:#d3d0c2; border-radius:0; background:#b8b4a5; color:#242724; font:14px monospace; padding:2px; } .ds-terminal header { background:#4e5869; color:#c9c8b5; padding:5px 7px; font-weight:700; } .ds-terminal pre { min-height:180px; margin:2px 0 0; padding:8px; background:#171a17; color:#c9c8b5; border:1px solid #6e6c64; } .ds-terminal:focus-within { outline:1px solid #4e5869; outline-offset:1px; }"
+    },
+    {
+      "name": "Desktop Icon",
+      "kind": "custom",
+      "description": "Text-led bitmap icon with no modern tile container.",
+      "html": "<button class=\"ds-desktop-icon\"><span>[&gt;_]</span>TERMINAL</button>",
+      "css": ".ds-desktop-icon { display:grid; gap:4px; justify-items:center; width:72px; border:0; border-radius:0; padding:4px; background:transparent; color:#c9c8b5; font:700 12px monospace; } .ds-desktop-icon span { color:#242724; background:#b8b4a5; border:1px solid #d3d0c2; border-right-color:#6e6c64; border-bottom-color:#6e6c64; padding:8px 5px; } .ds-desktop-icon:hover,.ds-desktop-icon:focus-visible { outline:1px dotted #c9c8b5; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Quiet Workstation",
+    "overview": "Argus 9OS feels like a maintained computer in a dim room around the turn of the millennium: practical, slightly severe, and built for legibility. It combines old Linux desktop economy, early imageboard density, and tactile one-pixel system chrome.",
+    "keyCharacteristics": ["Muted olive field with warm gray system chrome", "Square corners and crisp one-pixel bevels", "Small bitmap type with compact, keyboard-first labels", "One desaturated title color and one rare oxblood state color", "Real system status in place of decorative widgets"],
+    "rules": [
+      { "name": "The Dust Rule", "body": "No fully saturated color appears anywhere. Accent color stays under ten percent of a screen and always communicates state.", "section": "colors" },
+      { "name": "The Integer Pixel Rule", "body": "Glyphs are scaled only by whole numbers and never smoothed, stretched, or shadowed.", "section": "typography" },
+      { "name": "The One-Pixel Bevel Rule", "body": "Every raised or recessed edge uses exactly one highlight and one shadow line. Never stack ornamental borders.", "section": "elevation" }
+    ],
+    "dos": ["Do use #4c5148 as the dominant field and #b8b4a5 for system chrome.", "Do use square corners and exact one-pixel highlight/shadow edges.", "Do show real keyboard, storage, and shell state in terse language.", "Do keep the terminal readable with #c9c8b5 on #171a17.", "Do preserve keyboard and serial access for every important action."],
+    "donts": ["Don't make ArgusOS a glossy Windows XP clone or a literal 4chan clone.", "Don't use copied Microsoft or imageboard artwork, icons, trademarks, or layout.", "Don't use neon cyberpunk accents, gradients, glassmorphism, or rounded cards.", "Don't use a colored side stripe on any panel or item.", "Don't animate anything that does not communicate a state change."]
+  }
+}
