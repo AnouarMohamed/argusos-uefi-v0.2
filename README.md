@@ -1,4 +1,4 @@
-# ArgusOS UEFI Study Kernel v0.7
+# ArgusOS UEFI Study Kernel v0.8
 
 A deliberately small x86-64 UEFI bare-metal study kernel.
 
@@ -38,6 +38,12 @@ kernel with framebuffer and direct COM1 output.
   checksum module without giving it boot, allocator, interrupt, or device ownership.
 - A dependency-free Python host tool creates test media and drives interactive
   QEMU smoke tests through the native serial shell.
+- Physical and heap allocators run fragmentation, exhaustion, invalid-free,
+  double-free, and deterministic randomized invariant tests.
+- The kernel stack begins with an unmapped 4 KiB guard page.
+- A 64-bit TSS gives double faults a dedicated IST1 emergency stack.
+- PS/2 input is delivered through an ACPI-aware I/O-APIC route into a bounded
+  interrupt-safe queue, with polling retained as a hardware fallback.
 
 ## What is *not* implemented yet?
 
@@ -66,9 +72,12 @@ build/BOOTX64.EFI
 
 CI performs the same freestanding build with warnings treated as errors, creates
 a FAT32 boot image, boots it with QEMU/OVMF, enters `boot`, and requires explicit
-post-firmware, allocator, paging, IDT, APIC-timer, and kernel-shell markers. It
-then drives the native COM1 input path and verifies `status`, `modules`, and
-`alloc 4096`.
+post-firmware, allocator, paging, guard-page, TSS/IST, APIC-timer, and
+kernel-shell markers. It drives COM1 commands, injects a QEMU hardware key
+sequence through the PS/2 IRQ path, and verifies allocator invariants. Separate
+negative boots require breakpoint, stack-guard page-fault, and double-fault
+diagnostics.
+
 The media creation, OVMF discovery, serial synchronization, and shell probes are
 implemented by `tools/argus.py` instead of inline CI shell/Expect logic.
 
@@ -78,6 +87,7 @@ Useful host targets:
 make host-check  # syntax-check the Python host tool
 make test-image  # create build/argus-test.img
 make smoke       # build, boot QEMU/OVMF, and probe the native shell
+make fault-check # require breakpoint, guard-page, and double-fault diagnostics
 ```
 
 To create the removable-media directory structure:
@@ -120,6 +130,8 @@ mem
 memmap
 boot
 bootfault
+bootguard
+bootdouble
 color 14
 video
 echo hello
@@ -137,10 +149,12 @@ status
 mem
 heap
 heaptest
+memtest
 alloc 4096
 modules
 ticks
 input
+irqtest
 clear
 echo hello
 fault
@@ -158,14 +172,15 @@ src/kernel.c    post-firmware kernel entry and subsystem initialization
 src/pmm.c       tracked physical-page and contiguous-run allocator
 src/heap.c      aligned first-fit kernel heap with split/coalesce support
 src/paging.c    kernel-owned identity page tables and memory attributes
-src/acpi.c      validated RSDP/XSDT/MADT discovery
-src/arch.c      GDT, IDT, exception/external dispatch, and legacy PIC masking
-src/apic.c      xAPIC/x2APIC activation and periodic local timer
+src/acpi.c      validated RSDP/XSDT/MADT discovery and IRQ overrides
+src/arch.c      GDT, IDT, TSS/IST, exception dispatch, and PIC masking
+src/apic.c      local APIC timer and I/O-APIC interrupt routing
 src/serial.c    direct 16550/COM1 output and nonblocking input
-src/ps2.c       native PS/2 Set-1 keyboard decoder
+src/ps2.c       IRQ-driven PS/2 decoder, queue, and polling fallback
 src/input.c     unified nonblocking COM1/PS2 input selection
 src/kconsole.c  post-firmware framebuffer/serial console
 src/kernel_shell.c native post-firmware command monitor
+src/memory.c    freestanding memset/memcpy/memmove primitives
 src/module_abi.h versioned cross-language descriptor and function contract
 src/module.c     C-side module validation, registry, and boot self-test
 src/rust_probe.rs bounded no_std checksum module behind ABI v1
@@ -270,16 +285,22 @@ Implemented:
 - one statically linked `no_std` Rust FNV-1a module targeting Microsoft x64 COFF
 - a `modules` shell command and CI markers proving the Rust code executed
 
-### Stage H — next: hardening the foundations
+### Stage H — completed in v0.8: hardened foundations
 
-Recommended order:
+Implemented:
 
-1. allocator fragmentation, exhaustion, invalid-free, and randomized invariant tests
-2. an interrupt-routing harness followed by IRQ-driven PS/2 input
-3. an IST-backed double-fault path and a kernel-stack guard page
-4. Python-driven negative boot tests that require specific panic diagnostics
+- PMM bitmap/count validation plus fragmented-run and invalid/double-free probes
+- heap structural validation, randomized allocation sequences, fragmentation,
+  exhaustion, invalid-free, and double-free tests
+- kernel-owned freestanding byte-copy/set primitives required by generated code
+- a 4 KiB non-present guard below the 64 KiB kernel stack
+- a 64-bit TSS and dedicated 16 KiB IST1 double-fault stack
+- ACPI interrupt-override parsing and I/O-APIC routing for keyboard IRQ1
+- an interrupt-produced PS/2 ring buffer with overflow accounting and polling fallback
+- QEMU control-socket key injection that proves an IRQ-delivered shell command
+- Python negative boots for breakpoint, guard-page, and true double-fault diagnostics
 
-### Stage I — storage/files
+### Stage I — next: storage/files
 Recommended order:
 
 1. simple RAM filesystem
@@ -306,14 +327,15 @@ At that point ArgusOS is becoming a conventional kernel rather than a firmware m
 4. Add a command history ring.
 5. Replace per-character fallback `OutputString` calls with buffered CHAR16 strings.
 6. Replace the uppercase-only 5x7 glyph set with a complete 8x16 terminal font.
-7. Add allocator tests for exhaustion, invalid frees, and fragmented maps.
-8. Add an IST-backed double-fault handler and guard page for the kernel stack.
-9. Add command history and cursor editing to the native kernel monitor.
+7. Add command history and cursor editing to the native kernel monitor.
+8. Add a RAM-backed virtual filesystem with bounded path parsing.
+9. Add a read-only FAT32 parser over an in-memory block-device fixture.
 
 ## Important distinction
 
 Call this version an **early UEFI-loaded kernel with a native post-boot
 monitor**. The initial monitor is firmware-backed; the monitor reached through
 `boot` owns its stack, page tables, heap, interrupt handling, console, and input,
-and no longer uses Boot Services. It is a real kernel boundary, while still
-being far from a general-purpose OS.
+and no longer uses Boot Services. Guard pages and an IST-backed double-fault path
+contain early stack failures. It is a real kernel boundary, while still being
+far from a general-purpose OS.

@@ -84,7 +84,12 @@ void *kmalloc(uint64_t requested_size) {
 
 int kfree(void *pointer) {
     if (!pointer) return 0;
-    heap_block_t *block = (heap_block_t *)pointer - 1;
+    uint64_t address = (uint64_t)(uintptr_t)pointer;
+    if (!first_block || address < heap_base + sizeof(heap_block_t) ||
+        address >= heap_base + heap_size || (address & (HEAP_ALIGNMENT - 1u)))
+        return 0;
+    heap_block_t *block = (heap_block_t *)(uintptr_t)(
+        address - sizeof(heap_block_t));
     if (!block_in_heap(block) || block->magic != HEAP_BLOCK_MAGIC || block->free)
         return 0;
 
@@ -115,8 +120,34 @@ uint64_t heap_used_bytes(void) {
     return total;
 }
 
+int heap_validate(void) {
+    if (!first_block || (uint64_t)(uintptr_t)first_block != heap_base) return 0;
+    heap_block_t *previous = 0;
+    uint64_t cursor = heap_base;
+    uint64_t end = heap_base + heap_size;
+    uint64_t maximum_blocks = heap_size / sizeof(heap_block_t);
+    uint64_t blocks = 0;
+
+    for (heap_block_t *block = first_block; block; block = block->next) {
+        uint64_t address = (uint64_t)(uintptr_t)block;
+        if (++blocks > maximum_blocks || !block_in_heap(block) ||
+            address != cursor || block->magic != HEAP_BLOCK_MAGIC ||
+            block->previous != previous || !block->size ||
+            (block->size & (HEAP_ALIGNMENT - 1u)) ||
+            block->size > end - address - sizeof(heap_block_t) ||
+            (previous && previous->free && block->free))
+            return 0;
+        cursor = address + sizeof(heap_block_t) + block->size;
+        if (block->next && (uint64_t)(uintptr_t)block->next != cursor) return 0;
+        previous = block;
+    }
+    return cursor == end;
+}
+
 int heap_self_test(void) {
     uint64_t free_before = heap_free_bytes();
+    uint64_t used_before = heap_used_bytes();
+    if (!heap_validate()) return 0;
     uint8_t *a = (uint8_t *)kmalloc(1);
     uint8_t *b = (uint8_t *)kmalloc(33);
     uint8_t *c = (uint8_t *)kmalloc(4096);
@@ -131,8 +162,59 @@ int heap_self_test(void) {
     c[4095] = 0xC5u;
     int valid = a[0] == 0xA1u && b[0] == 0xB2u && b[32] == 0xB3u &&
                 c[0] == 0xC4u && c[4095] == 0xC5u;
+    valid = !kfree(a + 1) && !kfree(0) && valid;
     valid = kfree(b) && valid;
     valid = kfree(a) && valid;
     valid = kfree(c) && valid;
-    return valid && heap_free_bytes() == free_before && heap_used_bytes() == 0;
+    valid = !kfree(c) && heap_validate() && valid;
+
+    uint8_t *random_slots[64] = {0};
+    uint64_t random_sizes[64] = {0};
+    uint32_t random = 0xA86B10C5u;
+    for (unsigned operation = 0; operation < 512; ++operation) {
+        random = random * 1664525u + 1013904223u;
+        unsigned slot = (random >> 8) & 63u;
+        if (random_slots[slot]) {
+            uint8_t final_value = (uint8_t)(slot ^ 0xA5u);
+            if (random_sizes[slot] == 1u)
+                valid = random_slots[slot][0] == final_value && valid;
+            else
+                valid = random_slots[slot][0] == (uint8_t)(slot + 1u) &&
+                        random_slots[slot][random_sizes[slot] - 1u] == final_value &&
+                        valid;
+            valid = kfree(random_slots[slot]) && valid;
+            random_slots[slot] = 0;
+        } else {
+            uint64_t size = ((uint64_t)random & 2047u) + 1u;
+            uint8_t *allocation = (uint8_t *)kmalloc(size);
+            if (allocation) {
+                allocation[0] = (uint8_t)(slot + 1u);
+                allocation[size - 1u] = (uint8_t)(slot ^ 0xA5u);
+                random_slots[slot] = allocation;
+                random_sizes[slot] = size;
+            }
+        }
+        valid = heap_validate() && valid;
+    }
+    for (unsigned slot = 0; slot < 64; ++slot)
+        if (random_slots[slot]) valid = kfree(random_slots[slot]) && valid;
+
+    void *exhaustion[256] = {0};
+    unsigned allocated = 0;
+    while (allocated < 256u) {
+        exhaustion[allocated] = kmalloc(2048u);
+        if (!exhaustion[allocated]) break;
+        ++allocated;
+    }
+    valid = allocated != 0 && allocated < 256u && !kmalloc(2048u) && valid;
+    for (unsigned i = 0; i < allocated; i += 2) {
+        valid = kfree(exhaustion[i]) && valid;
+        exhaustion[i] = kmalloc(512u);
+        valid = exhaustion[i] != 0 && valid;
+    }
+    for (unsigned i = 0; i < allocated; ++i)
+        if (exhaustion[i]) valid = kfree(exhaustion[i]) && valid;
+
+    return valid && heap_validate() && heap_free_bytes() == free_before &&
+           heap_used_bytes() == used_before;
 }

@@ -6,6 +6,7 @@
 int heap_init(uint64_t pages);
 void *kmalloc(uint64_t size);
 int kfree(void *pointer);
+int heap_validate(void);
 int heap_self_test(void);
 uint64_t heap_total_bytes(void);
 uint64_t heap_free_bytes(void);

@@ -164,6 +164,18 @@ arch_load_idt:
     lidt [rcx]
     ret
 
+.globl arch_load_task_register
+arch_load_task_register:
+    mov ax, 0x18
+    ltr ax
+    ret
+
+.globl arch_read_task_register
+arch_read_task_register:
+    str ax
+    movzx eax, ax
+    ret
+
 .globl arch_enable_interrupts
 arch_enable_interrupts:
     sti
@@ -217,6 +229,7 @@ ISR_ERROR 29
 ISR_ERROR 30
 ISR_NO_ERROR 31
 ISR_NO_ERROR 64
+ISR_NO_ERROR 65
 ISR_NO_ERROR 255
 
 isr_common:
@@ -270,4 +283,4 @@ isr_stub_table:
     .quad isr_8, isr_9, isr_10, isr_11, isr_12, isr_13, isr_14, isr_15
     .quad isr_16, isr_17, isr_18, isr_19, isr_20, isr_21, isr_22, isr_23
     .quad isr_24, isr_25, isr_26, isr_27, isr_28, isr_29, isr_30, isr_31
-    .quad isr_64, isr_255
+    .quad isr_64, isr_65, isr_255

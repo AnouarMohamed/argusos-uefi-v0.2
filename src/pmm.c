@@ -152,5 +152,61 @@ int pmm_release_pages(uint64_t address, uint64_t count) {
     return 1;
 }
 
+int pmm_validate(void) {
+    uint64_t counted_managed = 0;
+    uint64_t counted_free = 0;
+    for (uint64_t page = 0; page < page_count; ++page) {
+        if (!bit_get(usable_bitmap, page)) continue;
+        ++counted_managed;
+        if (!bit_get(used_bitmap, page)) ++counted_free;
+    }
+    return counted_managed == managed_count && counted_free == free_count &&
+           free_count <= managed_count;
+}
+
+int pmm_self_test(void) {
+    uint64_t before = free_count;
+    if (before < 16u || !pmm_validate()) return 0;
+    int valid = !pmm_release_pages(0, 0) &&
+                !pmm_free_page(1u) &&
+                !pmm_free_page(page_count * ARGUS_PAGE_SIZE);
+
+    uint64_t pages[8] = {0};
+    int held[8] = {0};
+    for (unsigned i = 0; i < 8; ++i) {
+        pages[i] = pmm_alloc_page();
+        held[i] = pages[i] != 0;
+        valid = held[i] && valid;
+        for (unsigned previous = 0; previous < i; ++previous)
+            if (pages[i] == pages[previous]) valid = 0;
+    }
+
+    for (unsigned i = 0; i < 8; i += 2) {
+        if (held[i]) {
+            valid = pmm_free_page(pages[i]) && valid;
+            held[i] = 0;
+        }
+    }
+    valid = pmm_validate() && valid;
+
+    uint64_t run = pmm_alloc_pages(2u);
+    valid = run != 0 && valid;
+    for (unsigned i = 0; i < 8; i += 2)
+        if (run == pages[i]) valid = 0;
+    if (run) valid = pmm_release_pages(run, 2u) && valid;
+
+    for (unsigned i = 0; i < 8; ++i)
+        if (held[i]) valid = pmm_free_page(pages[i]) && valid;
+
+    uint64_t double_free_probe = pmm_alloc_page();
+    valid = double_free_probe != 0 && valid;
+    if (double_free_probe) {
+        valid = pmm_free_page(double_free_probe) && valid;
+        valid = !pmm_free_page(double_free_probe) && valid;
+    }
+
+    return valid && free_count == before && pmm_validate();
+}
+
 uint64_t pmm_managed_pages(void) { return managed_count; }
 uint64_t pmm_free_pages(void) { return free_count; }

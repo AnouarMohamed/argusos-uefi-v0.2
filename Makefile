@@ -11,7 +11,7 @@ RUSTFLAGS = --target $(RUST_TARGET) --crate-name argus_rust_probe \
 
 OBJS = build/main.obj build/boot.obj build/kernel.obj build/acpi.obj build/apic.obj \
        build/arch.obj build/heap.obj build/input.obj build/kconsole.obj \
-       build/kernel_shell.obj build/module.obj build/rust_probe.obj build/paging.obj \
+       build/kernel_shell.obj build/memory.obj build/module.obj build/rust_probe.obj build/paging.obj \
        build/pmm.obj build/ps2.obj build/serial.obj \
        build/uefi_memory.obj build/cpu.obj build/gop.obj build/console.obj build/font5x7.obj
 
@@ -41,13 +41,16 @@ build/arch.obj: src/arch.c src/arch.h src/apic.h src/kernel.h | build
 build/heap.obj: src/heap.c src/heap.h src/pmm.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-build/input.obj: src/input.c src/input.h src/ps2.h src/serial.h | build
+build/input.obj: src/input.c src/input.h src/acpi.h src/ps2.h src/serial.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/kconsole.obj: src/kconsole.c src/kconsole.h src/console.h src/serial.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/kernel_shell.obj: src/kernel_shell.c src/kernel_shell.h src/acpi.h src/apic.h src/boot_info.h src/heap.h src/input.h src/kconsole.h src/module.h src/module_abi.h src/paging.h src/pmm.h | build
+	$(CLANG) $(CFLAGS) -c $< -o $@
+
+build/memory.obj: src/memory.c | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/module.obj: src/module.c src/module.h src/module_abi.h | build
@@ -62,7 +65,7 @@ build/paging.obj: src/paging.c src/paging.h src/acpi.h src/boot_info.h src/pmm.h
 build/pmm.obj: src/pmm.c src/pmm.h src/boot_info.h src/uefi_memory.h src/efi.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-build/ps2.obj: src/ps2.c src/ps2.h | build
+build/ps2.obj: src/ps2.c src/ps2.h src/acpi.h src/apic.h src/arch.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/serial.obj: src/serial.c src/serial.h | build
@@ -97,10 +100,15 @@ test-image: build/BOOTX64.EFI
 smoke: build/BOOTX64.EFI
 	$(PYTHON) tools/argus.py smoke --efi $<
 
+fault-check: build/BOOTX64.EFI
+	$(PYTHON) tools/argus.py fault --efi $< --case breakpoint --log build/breakpoint.log
+	$(PYTHON) tools/argus.py fault --efi $< --case guard --log build/guard.log
+	$(PYTHON) tools/argus.py fault --efi $< --case double --log build/double.log
+
 host-check: | build
 	PYTHONPYCACHEPREFIX=build/pycache $(PYTHON) -m py_compile tools/argus.py
 
 clean:
 	rm -rf build EFI/BOOT/BOOTX64.EFI
 
-.PHONY: all clean host-check smoke test-image usb-tree
+.PHONY: all clean fault-check host-check smoke test-image usb-tree

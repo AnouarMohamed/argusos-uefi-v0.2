@@ -12,6 +12,8 @@
 extern void cpu_pause(void);
 extern void cpu_trigger_breakpoint(void);
 
+static uint64_t expected_guard_fault;
+
 static void kputc(char c) {
     kconsole_putc(c);
 }
@@ -62,34 +64,18 @@ void kernel_exception_panic(
         kprint_hex(fault_address);
     }
     kprint("\n");
+    if (vector == 14u && fault_address == expected_guard_fault)
+        kprint("STACK_GUARD_FAULT_CAUGHT\n");
+    if (vector == 8u)
+        kprint(arch_on_double_fault_ist()
+            ? "DOUBLE_FAULT_IST_ACTIVE\n" : "DOUBLE_FAULT_IST_MISSING\n");
     cpu_halt_forever();
-}
-
-static int allocator_self_test(void) {
-    uint64_t before = pmm_free_pages();
-    if (before < 7u) return 0;
-
-    uint64_t a = pmm_alloc_page();
-    uint64_t b = pmm_alloc_page();
-    uint64_t c = pmm_alloc_page();
-    int valid = a && b && c && a != b && a != c && b != c &&
-                pmm_free_pages() == before - 3u;
-
-    if (a) valid = pmm_free_page(a) && valid;
-    if (b) valid = pmm_free_page(b) && valid;
-    if (c) valid = pmm_free_page(c) && valid;
-    if (!valid || pmm_free_pages() != before) return 0;
-
-    uint64_t run = pmm_alloc_pages(4);
-    valid = run && pmm_free_pages() == before - 4u;
-    if (run) valid = pmm_release_pages(run, 4) && valid;
-    return valid && pmm_free_pages() == before;
 }
 
 void kernel_main(const boot_info_t *boot_info) {
     kconsole_clear();
 
-    kprint("ArgusOS kernel v0.7\n");
+    kprint("ArgusOS kernel v0.8\n");
     kprint("ARGUS_KERNEL_ONLINE\n");
 
     if (!boot_info || boot_info->magic != ARGUS_BOOT_INFO_MAGIC ||
@@ -97,6 +83,8 @@ void kernel_main(const boot_info_t *boot_info) {
         panic("invalid boot information");
     if (!boot_info->boot_services_exited)
         panic("firmware handoff incomplete");
+    if (boot_info->kernel_self_test > ARGUS_SELF_TEST_DOUBLE_FAULT)
+        panic("invalid kernel self-test request");
 
     kprint("BOOT_SERVICES_EXITED\n");
     kprint("Kernel image: ");
@@ -117,7 +105,7 @@ void kernel_main(const boot_info_t *boot_info) {
     kprint_dec(pmm_free_pages());
     kprint("\n");
 
-    if (!allocator_self_test()) panic("physical memory allocator self-test failed");
+    if (!pmm_self_test()) panic("physical memory allocator self-test failed");
     kprint("PMM_SELF_TEST_PASS\n");
 
     acpi_info_t acpi;
@@ -143,12 +131,16 @@ void kernel_main(const boot_info_t *boot_info) {
     kprint_dec(paging.table_pages);
     kprint("\nNX: ");
     kprint(paging.nx_enabled ? "enabled\n" : "unavailable\n");
+    kprint("Stack guard: ");
+    kprint_hex(paging.stack_guard_page);
+    kprint("\nSTACK_GUARD_ONLINE\n");
 
     if (!heap_init(128u)) panic("kernel heap initialization failed");
     if (!heap_self_test()) panic("kernel heap self-test failed");
     kprint("HEAP_SELF_TEST_PASS\nHeap capacity: ");
     kprint_dec(heap_total_bytes());
     kprint(" bytes\n");
+    kprint("ALLOCATOR_HARDENING_PASS\n");
 
     if (!module_init()) panic("module ABI validation failed");
     kprint("MODULE_ABI_V1_ONLINE\nRust module: ");
@@ -157,12 +149,21 @@ void kernel_main(const boot_info_t *boot_info) {
     if (!module_self_test()) panic("Rust module self-test failed");
     kprint("RUST_MODULE_SELF_TEST_PASS\n");
 
-    arch_init();
+    if (!arch_init()) panic("TSS/IDT initialization failed");
     kprint("GDT_IDT_ONLINE\n");
-    if (boot_info->exception_self_test) {
+    kprint("DOUBLE_FAULT_IST_ONLINE\n");
+    expected_guard_fault = paging.stack_guard_page;
+    if (boot_info->kernel_self_test == ARGUS_SELF_TEST_BREAKPOINT) {
         kprint("EXCEPTION_SELF_TEST_BEGIN\n");
         cpu_trigger_breakpoint();
         panic("breakpoint exception returned unexpectedly");
+    } else if (boot_info->kernel_self_test == ARGUS_SELF_TEST_STACK_GUARD) {
+        kprint("STACK_GUARD_SELF_TEST_BEGIN\n");
+        *(volatile uint8_t *)(uintptr_t)paging.stack_guard_page = 0xA5u;
+        panic("stack guard page remained mapped");
+    } else if (boot_info->kernel_self_test == ARGUS_SELF_TEST_DOUBLE_FAULT) {
+        kprint("DOUBLE_FAULT_SELF_TEST_BEGIN\n");
+        arch_trigger_double_fault(paging.stack_guard_page);
     }
     if (!apic_init(&acpi)) panic("local APIC initialization failed");
     kprint("LOCAL_APIC_ONLINE\n");

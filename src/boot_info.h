@@ -4,8 +4,13 @@
 #include "uefi_memory.h"
 
 #define ARGUS_BOOT_INFO_MAGIC 0x4152475553424F4FULL
-#define ARGUS_BOOT_INFO_VERSION 1u
+#define ARGUS_BOOT_INFO_VERSION 2u
 #define ARGUS_PAGE_SIZE 4096ULL
+
+#define ARGUS_SELF_TEST_NONE 0u
+#define ARGUS_SELF_TEST_BREAKPOINT 1u
+#define ARGUS_SELF_TEST_STACK_GUARD 2u
+#define ARGUS_SELF_TEST_DOUBLE_FAULT 3u
 
 typedef struct {
     uint64_t base;
@@ -27,7 +32,7 @@ typedef struct {
     uint64_t magic;
     uint32_t version;
     uint32_t boot_services_exited;
-    uint32_t exception_self_test;
+    uint32_t kernel_self_test;
     uint32_t reserved;
 
     memory_map_t memory_map;
@@ -37,6 +42,7 @@ typedef struct {
     physical_range_t kernel_image;
     physical_range_t boot_info_storage;
     physical_range_t kernel_stack;
+    physical_range_t kernel_stack_guard;
     physical_range_t pmm_bitmap_storage;
     physical_range_t memory_map_storage;
 

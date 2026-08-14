@@ -8,6 +8,7 @@ typedef struct {
     uint64_t root_table;
     uint64_t mapped_bytes;
     uint64_t table_pages;
+    uint64_t stack_guard_page;
     int nx_enabled;
 } paging_info_t;
 

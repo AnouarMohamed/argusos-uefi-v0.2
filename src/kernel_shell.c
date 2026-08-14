@@ -42,10 +42,12 @@ static void print_help(void) {
     kconsole_write("  mem          physical-page statistics\n");
     kconsole_write("  heap         heap statistics\n");
     kconsole_write("  heaptest     rerun allocator checks\n");
+    kconsole_write("  memtest      rerun PMM + heap hardening tests\n");
     kconsole_write("  alloc N      allocate, verify, and free N bytes\n");
     kconsole_write("  modules      validated kernel modules\n");
     kconsole_write("  ticks        local-APIC timer ticks\n");
     kconsole_write("  input        native input backends\n");
+    kconsole_write("  irqtest      confirm IRQ keyboard command delivery\n");
     kconsole_write("  clear        clear framebuffer/terminal\n");
     kconsole_write("  echo TEXT    print text\n");
     kconsole_write("  fault        trigger breakpoint diagnostics\n");
@@ -57,13 +59,15 @@ static void print_status(
     const acpi_info_t *acpi,
     const paging_info_t *paging
 ) {
-    kconsole_write("\nArgusOS kernel v0.7\n");
+    kconsole_write("\nArgusOS kernel v0.8\n");
     kconsole_write("Boot Services: exited\nCPUs: ");
     kconsole_write_dec(acpi->enabled_cpu_count);
     kconsole_write("\nCR3: ");
     kconsole_write_hex(paging->root_table);
     kconsole_write("\nNX: ");
     kconsole_write(paging->nx_enabled ? "enabled" : "unavailable");
+    kconsole_write("\nStack guard: ");
+    kconsole_write_hex(paging->stack_guard_page);
     kconsole_write("\nFramebuffer: ");
     if (boot_info->framebuffer.usable) {
         kconsole_write_dec(boot_info->framebuffer.width);
@@ -144,6 +148,9 @@ static void execute_command(
     else if (strings_equal(line, "heap")) print_heap();
     else if (strings_equal(line, "heaptest"))
         kconsole_write(heap_self_test() ? "HEAP_SELF_TEST_PASS\n" : "HEAP_SELF_TEST_FAIL\n");
+    else if (strings_equal(line, "memtest"))
+        kconsole_write(pmm_self_test() && heap_self_test()
+            ? "ALLOCATOR_HARDENING_PASS\n" : "ALLOCATOR_HARDENING_FAIL\n");
     else if (starts_with(line, "alloc ")) allocation_probe(line + 6);
     else if (strings_equal(line, "modules")) print_modules();
     else if (strings_equal(line, "ticks")) {
@@ -156,8 +163,15 @@ static void execute_command(
         kconsole_write(input_has_serial() ? "online" : "unavailable");
         kconsole_write("\nPS/2 keyboard: ");
         kconsole_write(input_has_keyboard() ? "online" : "unavailable");
+        kconsole_write("\nPS/2 mode: ");
+        kconsole_write(input_keyboard_uses_irq() ? "I/O APIC IRQ" : "polling fallback");
+        kconsole_write("\nDropped keys: ");
+        kconsole_write_dec(input_dropped_keys());
         kconsole_write("\n");
     }
+    else if (strings_equal(line, "irqtest"))
+        kconsole_write(input_keyboard_uses_irq()
+            ? "PS2_IRQ_INPUT_OK\n" : "PS2_IRQ_INPUT_UNAVAILABLE\n");
     else if (strings_equal(line, "clear")) kconsole_clear();
     else if (starts_with(line, "echo ")) { kconsole_write(line + 5); kconsole_write("\n"); }
     else if (strings_equal(line, "fault")) cpu_trigger_breakpoint();
@@ -175,9 +189,11 @@ void kernel_shell_run(
 ) {
     char line[128];
     unsigned used = 0;
-    input_init();
+    input_init(acpi);
 
     kconsole_write("Native input initialized.\n");
+    kconsole_write(input_keyboard_uses_irq()
+        ? "PS2_IRQ_ONLINE\n" : "PS2_POLLING_FALLBACK\n");
     kconsole_write("KERNEL_SHELL_READY\n");
     kconsole_write("argus-kernel> ");
 

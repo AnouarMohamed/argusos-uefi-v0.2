@@ -4,7 +4,7 @@
 #include "gop.h"
 #include "uefi_memory.h"
 
-#define ARGUS_VERSION "0.7"
+#define ARGUS_VERSION "0.8"
 
 static EFI_SYSTEM_TABLE *ST;
 static EFI_SIMPLE_TEXT_INPUT_PROTOCOL *IN;
@@ -253,7 +253,9 @@ static void help(void) {
     print("  mem        summarize UEFI memory map\n");
     print("  memmap     first 32 memory descriptors\n");
     print("  boot       leave firmware and enter the Argus kernel\n");
-    print("  bootfault  enter kernel and test exception diagnostics\n");
+    print("  bootfault  test breakpoint exception diagnostics\n");
+    print("  bootguard  test the unmapped kernel-stack guard page\n");
+    print("  bootdouble test the IST-backed double-fault path\n");
     print("  color N    foreground color 0..15\n");
     print("  echo TEXT  print text\n");
     print("  reboot     cold reboot\n");
@@ -269,7 +271,8 @@ static void about(void) {
     print("The boot command enters an Argus-owned memory and interrupt environment.\n");
     print("The post-firmware kernel provides native serial/PS2 input and a heap.\n");
     print("Python owns repeatable host tests; one no_std Rust module uses ABI v1.\n");
-    print("Next stage: allocator hardening and interrupt-routing tests.\n\n");
+    print("Allocator invariants, guarded stacks, and IRQ input are enforced.\n");
+    print("Next stage: storage abstractions and a RAM filesystem.\n\n");
 }
 
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
@@ -316,10 +319,17 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
         else if (streq(linebuf, "time")) cmd_time();
         else if (streq(linebuf, "mem")) cmd_mem();
         else if (streq(linebuf, "memmap")) cmd_memmap();
-        else if (streq(linebuf, "boot") || streq(linebuf, "bootfault")) {
-            int exception_self_test = streq(linebuf, "bootfault");
+        else if (streq(linebuf, "boot") || streq(linebuf, "bootfault") ||
+                 streq(linebuf, "bootguard") || streq(linebuf, "bootdouble")) {
+            uint32_t kernel_self_test = ARGUS_SELF_TEST_NONE;
+            if (streq(linebuf, "bootfault"))
+                kernel_self_test = ARGUS_SELF_TEST_BREAKPOINT;
+            else if (streq(linebuf, "bootguard"))
+                kernel_self_test = ARGUS_SELF_TEST_STACK_GUARD;
+            else if (streq(linebuf, "bootdouble"))
+                kernel_self_test = ARGUS_SELF_TEST_DOUBLE_FAULT;
             print("Preparing Argus kernel handoff...\n");
-            EFI_STATUS status = boot_kernel(IMAGE, ST, exception_self_test);
+            EFI_STATUS status = boot_kernel(IMAGE, ST, kernel_self_test);
             print("Kernel handoff preparation failed: 0x");
             print_hex_u64(status, 16);
             print("\n");

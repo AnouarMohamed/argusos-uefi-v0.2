@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import selectors
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -22,18 +24,58 @@ BOOT_MARKERS = (
     b"PMM_SELF_TEST_PASS",
     b"ACPI_MADT_ONLINE",
     b"PAGING_ONLINE",
+    b"STACK_GUARD_ONLINE",
     b"HEAP_SELF_TEST_PASS",
+    b"ALLOCATOR_HARDENING_PASS",
     b"MODULE_ABI_V1_ONLINE",
     b"RUST_MODULE_SELF_TEST_PASS",
     b"GDT_IDT_ONLINE",
+    b"DOUBLE_FAULT_IST_ONLINE",
     b"APIC_TIMER_TICK",
+    b"PS2_IRQ_ONLINE",
     b"KERNEL_SHELL_READY",
 )
 SHELL_PROBES = (
     (b"status\r", b"STATUS_OK"),
     (b"modules\r", b"MODULES_OK"),
     (b"alloc 4096\r", b"ALLOC_OK"),
+    (b"memtest\r", b"ALLOCATOR_HARDENING_PASS"),
+    (b"input\r", b"PS/2 mode: I/O APIC IRQ"),
 )
+FAULT_CASES = {
+    "breakpoint": (
+        b"bootfault\r",
+        (
+            b"STACK_GUARD_ONLINE",
+            b"DOUBLE_FAULT_IST_ONLINE",
+            b"EXCEPTION_SELF_TEST_BEGIN",
+            b"KERNEL_EXCEPTION",
+            b"Vector: 3",
+        ),
+    ),
+    "guard": (
+        b"bootguard\r",
+        (
+            b"STACK_GUARD_ONLINE",
+            b"DOUBLE_FAULT_IST_ONLINE",
+            b"STACK_GUARD_SELF_TEST_BEGIN",
+            b"KERNEL_EXCEPTION",
+            b"Vector: 14",
+            b"STACK_GUARD_FAULT_CAUGHT",
+        ),
+    ),
+    "double": (
+        b"bootdouble\r",
+        (
+            b"STACK_GUARD_ONLINE",
+            b"DOUBLE_FAULT_IST_ONLINE",
+            b"DOUBLE_FAULT_SELF_TEST_BEGIN",
+            b"KERNEL_EXCEPTION",
+            b"Vector: 8",
+            b"DOUBLE_FAULT_IST_ACTIVE",
+        ),
+    ),
+}
 OVMF_PAIRS = (
     ("/usr/share/OVMF/OVMF_CODE_4M.fd", "/usr/share/OVMF/OVMF_VARS_4M.fd"),
     ("/usr/share/OVMF/OVMF_CODE.fd", "/usr/share/OVMF/OVMF_VARS.fd"),
@@ -159,14 +201,78 @@ class SerialSession:
         self.selector.close()
 
 
+class QmpClient:
+    def __init__(self, connection: socket.socket) -> None:
+        self.connection = connection
+        self.stream = connection.makefile("rwb", buffering=0)
+        greeting = self._receive()
+        if "QMP" not in greeting:
+            raise ToolError("QEMU control socket returned an invalid greeting")
+        self.execute("qmp_capabilities")
+
+    @classmethod
+    def connect(cls, path: Path, timeout: float) -> "QmpClient":
+        deadline = time.monotonic() + timeout
+        while True:
+            connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                connection.connect(str(path))
+                connection.settimeout(timeout)
+                try:
+                    return cls(connection)
+                except Exception:
+                    connection.close()
+                    raise
+            except (FileNotFoundError, ConnectionRefusedError):
+                connection.close()
+                if time.monotonic() >= deadline:
+                    raise ToolError("timed out connecting to the QEMU control socket")
+                time.sleep(0.05)
+
+    def _receive(self) -> dict[str, object]:
+        line = self.stream.readline()
+        if not line:
+            raise ToolError("QEMU closed its control socket unexpectedly")
+        try:
+            response = json.loads(line)
+        except json.JSONDecodeError as error:
+            raise ToolError("QEMU returned invalid JSON on its control socket") from error
+        if not isinstance(response, dict):
+            raise ToolError("QEMU returned a malformed control response")
+        return response
+
+    def execute(self, command: str, arguments: dict[str, object] | None = None) -> object:
+        request: dict[str, object] = {"execute": command}
+        if arguments is not None:
+            request["arguments"] = arguments
+        self.stream.write(json.dumps(request).encode("utf-8") + b"\r\n")
+        while True:
+            response = self._receive()
+            if "error" in response:
+                raise ToolError(f"QEMU control command failed: {response['error']}")
+            if "return" in response:
+                return response["return"]
+
+    def send_key(self, key: str) -> None:
+        self.execute(
+            "human-monitor-command",
+            {"command-line": f"sendkey {key}"},
+        )
+
+    def close(self) -> None:
+        self.stream.close()
+        self.connection.close()
+
+
 def qemu_command(
     qemu: str,
     memory: str,
     ovmf_code: Path,
     ovmf_vars: Path,
     image: Path,
+    qmp_socket: Path | None = None,
 ) -> tuple[str, ...]:
-    return (
+    command = [
         qemu,
         "-display",
         "none",
@@ -186,7 +292,10 @@ def qemu_command(
         "-monitor",
         "none",
         "-nodefaults",
-    )
+    ]
+    if qmp_socket is not None:
+        command.extend(("-qmp", f"unix:{qmp_socket},server=on,wait=off"))
+    return tuple(command)
 
 
 def run_smoke(args: argparse.Namespace) -> None:
@@ -196,14 +305,17 @@ def run_smoke(args: argparse.Namespace) -> None:
     work = Path(temporary.name)
     image = work / "efi-test.img"
     ovmf_vars = work / "OVMF_VARS.fd"
+    qmp_socket = work / "qmp.sock"
     session: SerialSession | None = None
+    qmp: QmpClient | None = None
 
     try:
         create_fat_image(args.efi, image, args.image_size)
         shutil.copyfile(ovmf_template, ovmf_vars)
         session = SerialSession(
-            qemu_command(qemu, args.memory, ovmf_code, ovmf_vars, image)
+            qemu_command(qemu, args.memory, ovmf_code, ovmf_vars, image, qmp_socket)
         )
+        qmp = QmpClient.connect(qmp_socket, args.timeout)
 
         session.expect(b"argus64> ", args.timeout)
         session.send(b"boot\r")
@@ -215,6 +327,46 @@ def run_smoke(args: argparse.Namespace) -> None:
             session.send(command)
             session.expect(marker, args.timeout)
             session.expect(b"argus-kernel> ", args.timeout)
+
+        for key in "irqtest":
+            qmp.send_key(key)
+        qmp.send_key("ret")
+        session.expect(b"PS2_IRQ_INPUT_OK", args.timeout)
+        session.expect(b"argus-kernel> ", args.timeout)
+    finally:
+        try:
+            if qmp is not None:
+                qmp.close()
+        finally:
+            if session is not None:
+                session.stop()
+                args.log.parent.mkdir(parents=True, exist_ok=True)
+                args.log.write_bytes(session.transcript)
+        temporary.cleanup()
+
+    print(f"\nArgusOS smoke test passed; transcript: {args.log}")
+
+
+def run_fault(args: argparse.Namespace) -> None:
+    qemu = require_executable(args.qemu)
+    ovmf_code, ovmf_template = locate_ovmf(args.ovmf_code, args.ovmf_vars)
+    temporary = tempfile.TemporaryDirectory(prefix="argusos-fault-")
+    work = Path(temporary.name)
+    image = work / "efi-test.img"
+    ovmf_vars = work / "OVMF_VARS.fd"
+    session: SerialSession | None = None
+    boot_command, markers = FAULT_CASES[args.case]
+
+    try:
+        create_fat_image(args.efi, image, args.image_size)
+        shutil.copyfile(ovmf_template, ovmf_vars)
+        session = SerialSession(
+            qemu_command(qemu, args.memory, ovmf_code, ovmf_vars, image)
+        )
+        session.expect(b"argus64> ", args.timeout)
+        session.send(boot_command)
+        for marker in markers:
+            session.expect(marker, args.timeout)
     finally:
         if session is not None:
             session.stop()
@@ -222,7 +374,7 @@ def run_smoke(args: argparse.Namespace) -> None:
             args.log.write_bytes(session.transcript)
         temporary.cleanup()
 
-    print(f"\nArgusOS smoke test passed; transcript: {args.log}")
+    print(f"\nArgusOS {args.case} fault test passed; transcript: {args.log}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -243,6 +395,17 @@ def build_parser() -> argparse.ArgumentParser:
     smoke.add_argument("--qemu", default="qemu-system-x86_64")
     smoke.add_argument("--ovmf-code", type=Path)
     smoke.add_argument("--ovmf-vars", type=Path)
+
+    fault = subparsers.add_parser("fault", help="require a kernel fault diagnostic")
+    fault.add_argument("--efi", type=Path, required=True, help="BOOTX64.EFI input")
+    fault.add_argument("--case", choices=FAULT_CASES, required=True)
+    fault.add_argument("--memory", default="256M", help="QEMU guest memory")
+    fault.add_argument("--image-size", type=int, default=64, help="FAT image size in MiB")
+    fault.add_argument("--timeout", type=float, default=25.0, help="per-marker timeout")
+    fault.add_argument("--log", type=Path, default=Path("build/qemu-fault.log"))
+    fault.add_argument("--qemu", default="qemu-system-x86_64")
+    fault.add_argument("--ovmf-code", type=Path)
+    fault.add_argument("--ovmf-vars", type=Path)
     return parser
 
 
@@ -257,8 +420,10 @@ def main() -> None:
         if args.operation == "image":
             create_fat_image(args.efi, args.output, args.size)
             print(f"Created UEFI test image: {args.output}")
-        else:
+        elif args.operation == "smoke":
             run_smoke(args)
+        else:
+            run_fault(args)
     except (OSError, ToolError) as error:
         fail(str(error))
 

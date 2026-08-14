@@ -6,6 +6,7 @@
 #include "serial.h"
 
 #define KERNEL_STACK_PAGES 16u
+#define KERNEL_STACK_ALLOCATION_PAGES (KERNEL_STACK_PAGES + 1u)
 
 _Static_assert(sizeof(boot_info_t) <= ARGUS_PAGE_SIZE, "boot_info_t must fit in one page");
 
@@ -107,7 +108,7 @@ static EFI_STATUS prepare_allocations(
 
     EFI_STATUS status = allocate_pages(bs, 1, &info_range);
     if (status != EFI_SUCCESS) return status;
-    status = allocate_pages(bs, KERNEL_STACK_PAGES, &stack_range);
+    status = allocate_pages(bs, KERNEL_STACK_ALLOCATION_PAGES, &stack_range);
     if (status != EFI_SUCCESS) {
         free_range(bs, info_range);
         return status;
@@ -125,6 +126,8 @@ static EFI_STATUS prepare_allocations(
     info->version = ARGUS_BOOT_INFO_VERSION;
     info->boot_info_storage = info_range;
     info->kernel_stack = stack_range;
+    info->kernel_stack_guard.base = stack_range.base;
+    info->kernel_stack_guard.size = ARGUS_PAGE_SIZE;
     info->pmm_bitmap_storage = bitmap_range;
     info->pmm_page_count = page_count;
     info->pmm_bitmap_bytes = bytes_per_bitmap;
@@ -144,7 +147,7 @@ static void halt_after_handoff_failure(EFI_STATUS status) {
 EFI_STATUS boot_kernel(
     EFI_HANDLE image,
     EFI_SYSTEM_TABLE *system_table,
-    int exception_self_test
+    uint32_t kernel_self_test
 ) {
     EFI_BOOT_SERVICES *bs = system_table->BootServices;
     EFI_GUID loaded_image_guid = EFI_LOADED_IMAGE_PROTOCOL_GUID;
@@ -167,7 +170,7 @@ EFI_STATUS boot_kernel(
 
     info->kernel_image.base = (uint64_t)(uintptr_t)loaded_image->ImageBase;
     info->kernel_image.size = loaded_image->ImageSize;
-    info->exception_self_test = exception_self_test != 0;
+    info->kernel_self_test = kernel_self_test;
     info->acpi_rsdp = find_acpi_rsdp(system_table);
     capture_framebuffer(info);
 

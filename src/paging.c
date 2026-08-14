@@ -7,6 +7,7 @@
 #define PAGE_PCD      (1ULL << 4)
 #define PAGE_LARGE    (1ULL << 7)
 #define PAGE_NX       (1ULL << 63)
+#define PAGE_ADDRESS_MASK 0x000FFFFFFFFFF000ULL
 #define LARGE_PAGE_SIZE 0x200000ULL
 
 extern int cpu_has_nx(void);
@@ -89,6 +90,39 @@ static int map_large_page(
     return 1;
 }
 
+static int unmap_4k_page(uint64_t root, uint64_t physical) {
+    uint64_t *pml4 = (uint64_t *)(uintptr_t)root;
+    unsigned pml4_index = (unsigned)((physical >> 39) & 0x1FFu);
+    unsigned pdpt_index = (unsigned)((physical >> 30) & 0x1FFu);
+    unsigned pd_index = (unsigned)((physical >> 21) & 0x1FFu);
+    unsigned pt_index = (unsigned)((physical >> 12) & 0x1FFu);
+
+    if (!(pml4[pml4_index] & PAGE_PRESENT)) return 0;
+    uint64_t *pdpt = (uint64_t *)(uintptr_t)(pml4[pml4_index] & PAGE_ADDRESS_MASK);
+    if (!(pdpt[pdpt_index] & PAGE_PRESENT)) return 0;
+    uint64_t *pd = (uint64_t *)(uintptr_t)(pdpt[pdpt_index] & PAGE_ADDRESS_MASK);
+    if (!(pd[pd_index] & PAGE_PRESENT)) return 0;
+
+    uint64_t *pt;
+    if (pd[pd_index] & PAGE_LARGE) {
+        uint64_t large_entry = pd[pd_index];
+        uint64_t large_base = large_entry & 0x000FFFFFFFE00000ULL;
+        uint64_t leaf_flags = large_entry & ~PAGE_ADDRESS_MASK;
+        leaf_flags &= ~PAGE_LARGE;
+        uint64_t pt_address = allocate_table();
+        if (!pt_address) return 0;
+        pt = (uint64_t *)(uintptr_t)pt_address;
+        for (unsigned i = 0; i < 512; ++i)
+            pt[i] = (large_base + (uint64_t)i * ARGUS_PAGE_SIZE) | leaf_flags;
+        pd[pd_index] = pt_address | PAGE_PRESENT | PAGE_WRITABLE;
+    } else {
+        pt = (uint64_t *)(uintptr_t)(pd[pd_index] & PAGE_ADDRESS_MASK);
+    }
+
+    pt[pt_index] = 0;
+    return 1;
+}
+
 static uint64_t range_end(physical_range_t range) {
     if (range.base > UINT64_MAX - range.size) return UINT64_MAX;
     return range.base + range.size;
@@ -99,6 +133,15 @@ int paging_init(
     const acpi_info_t *acpi,
     paging_info_t *paging_info
 ) {
+    if (boot_info->kernel_stack.size < 2u * ARGUS_PAGE_SIZE ||
+        boot_info->kernel_stack_guard.base != boot_info->kernel_stack.base ||
+        boot_info->kernel_stack_guard.size != ARGUS_PAGE_SIZE ||
+        (boot_info->kernel_stack_guard.base & (ARGUS_PAGE_SIZE - 1u)) != 0 ||
+        !overlaps(boot_info->kernel_stack.base, boot_info->kernel_stack.size,
+                  boot_info->kernel_stack_guard.base,
+                  boot_info->kernel_stack_guard.size))
+        return 0;
+
     uint64_t maximum = boot_info->pmm_page_count * ARGUS_PAGE_SIZE;
     uint64_t candidates[] = {
         range_end(boot_info->kernel_image),
@@ -132,6 +175,8 @@ int paging_init(
         if (!map_large_page(root, address, flags)) return 0;
     }
 
+    if (!unmap_4k_page(root, boot_info->kernel_stack_guard.base)) return 0;
+
     if (nx) cpu_enable_nx();
     cpu_enable_write_protect();
     cpu_load_cr3(root);
@@ -139,6 +184,7 @@ int paging_init(
     paging_info->root_table = root;
     paging_info->mapped_bytes = maximum;
     paging_info->table_pages = table_pages;
+    paging_info->stack_guard_page = boot_info->kernel_stack_guard.base;
     paging_info->nx_enabled = nx;
     return 1;
 }

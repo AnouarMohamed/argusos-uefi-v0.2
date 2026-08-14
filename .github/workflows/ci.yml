@@ -94,18 +94,41 @@ jobs:
 
       - name: Validate smoke-test transcript
         run: |
-          grep -Fq "ArgusOS UEFI Study Monitor v0.7" qemu.log
+          grep -Fq "ArgusOS UEFI Study Monitor v0.8" qemu.log
           grep -Fq "ARGUS_KERNEL_ONLINE" qemu.log
           grep -Fq "BOOT_SERVICES_EXITED" qemu.log
           grep -Fq "PMM_SELF_TEST_PASS" qemu.log
           grep -Fq "ACPI_MADT_ONLINE" qemu.log
           grep -Fq "PAGING_ONLINE" qemu.log
+          grep -Fq "STACK_GUARD_ONLINE" qemu.log
           grep -Fq "HEAP_SELF_TEST_PASS" qemu.log
+          grep -Fq "ALLOCATOR_HARDENING_PASS" qemu.log
           grep -Fq "MODULE_ABI_V1_ONLINE" qemu.log
           grep -Fq "RUST_MODULE_SELF_TEST_PASS" qemu.log
           grep -Fq "GDT_IDT_ONLINE" qemu.log
+          grep -Fq "DOUBLE_FAULT_IST_ONLINE" qemu.log
           grep -Fq "APIC_TIMER_TICK" qemu.log
+          grep -Fq "PS2_IRQ_ONLINE" qemu.log
+          grep -Fq "PS2_IRQ_INPUT_OK" qemu.log
           grep -Fq "KERNEL_SHELL_READY" qemu.log
           grep -Fq "STATUS_OK" qemu.log
           grep -Fq "MODULES_OK" qemu.log
           grep -Fq "ALLOC_OK" qemu.log
+
+      - name: Require protected fault paths
+        run: |
+          python3 tools/argus.py fault \
+            --efi artifacts/build/BOOTX64.EFI \
+            --case breakpoint \
+            --log breakpoint.log
+          python3 tools/argus.py fault \
+            --efi artifacts/build/BOOTX64.EFI \
+            --case guard \
+            --log guard.log
+          python3 tools/argus.py fault \
+            --efi artifacts/build/BOOTX64.EFI \
+            --case double \
+            --log double.log
+          grep -Fq "Vector: 3" breakpoint.log
+          grep -Fq "STACK_GUARD_FAULT_CAUGHT" guard.log
+          grep -Fq "DOUBLE_FAULT_IST_ACTIVE" double.log

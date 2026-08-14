@@ -28,8 +28,10 @@ typedef struct {
 
 typedef void (*interrupt_handler_t)(interrupt_frame_t *frame);
 
-void arch_init(void);
+int arch_init(void);
 void arch_enable_interrupts(void);
+void arch_trigger_double_fault(uint64_t unmapped_address) __attribute__((noreturn));
+int arch_on_double_fault_ist(void);
 int interrupt_register(uint8_t vector, interrupt_handler_t handler);
 int interrupt_unregister(uint8_t vector, interrupt_handler_t handler);
 void interrupt_dispatch(interrupt_frame_t *frame);
