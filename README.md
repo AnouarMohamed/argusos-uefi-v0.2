@@ -33,6 +33,10 @@ Output:
 build/BOOTX64.EFI
 ```
 
+CI performs the same freestanding build with warnings treated as errors, creates
+a FAT32 boot image, boots it with QEMU/OVMF, and verifies that both the ArgusOS
+banner and shell prompt were reached.
+
 To create the removable-media directory structure:
 
 ```sh
@@ -82,7 +86,7 @@ exit
 ## Source map
 
 ```text
-src/efi.h     minimal UEFI ABI/types/protocol structures
+src/efi.h       minimal UEFI ABI/types/protocol structures
 src/main.c      shell + UEFI memory/time/runtime interaction
 src/gop.c       GOP discovery and raw framebuffer pixel operations
 src/console.c   Argus framebuffer terminal + UEFI text fallback
@@ -112,7 +116,10 @@ Implemented:
 - scrolling
 - UEFI text-console fallback if GOP is unavailable
 
-The next useful improvement is a richer font and formatted-output layer.
+The framebuffer layer is deliberately small but now validates its mode, pitch,
+pixel masks, and backing-buffer size before writing. The next architectural step
+is memory ownership; a richer font and formatted-output layer can grow alongside
+it without delaying the kernel transition.
 
 ### Stage C — memory ownership
 Implement:
@@ -169,8 +176,8 @@ At that point ArgusOS is becoming a conventional kernel rather than a firmware m
 2. Add a `hexdump ADDRESS LENGTH` command, but restrict it to known RAM descriptors while learning.
 3. Change `memmap` to aggregate bytes by UEFI memory type.
 4. Add a command history ring.
-5. Replace per-character `OutputString` calls with buffered CHAR16 strings.
-6. Use GOP and draw your own terminal without `ConOut`.
+5. Replace per-character fallback `OutputString` calls with buffered CHAR16 strings.
+6. Replace the uppercase-only 5x7 glyph set with a complete 8x16 terminal font.
 7. Write a physical-page allocator and show free page counts.
 8. Add an assembly exception stub for divide-by-zero after you have an IDT.
 

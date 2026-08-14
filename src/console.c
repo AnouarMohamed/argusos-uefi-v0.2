@@ -20,6 +20,7 @@ static const uint8_t palette[16][3] = {
 };
 
 static void fallback_char(char c) {
+    if (!fallback_out) return;
     CHAR16 t[2] = {(CHAR16)(unsigned char)c, 0};
     if (c == '\n') {
         t[0] = '\r'; fallback_out->OutputString(fallback_out, t);
@@ -63,6 +64,10 @@ int console_init(EFI_SYSTEM_TABLE *st) {
     scale = (g->width >= 800 && g->height >= 600) ? 2u : 1u;
     cell_w = 6u * scale;
     cell_h = 9u * scale;
+    if (g->width < cell_w || g->height < cell_h) {
+        framebuffer_mode = 0;
+        return 0;
+    }
     cursor_x = cursor_y = 0;
     bg = gop_rgb(0, 0, 0);
     console_set_color(10);

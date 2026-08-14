@@ -6,32 +6,30 @@ on:
       - 'v*'
 
 jobs:
+  build-and-test:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   release:
+    needs: build-and-test
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Check out source
-        uses: actions/checkout@v4
+      - name: Download tested EFI artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: argusos-uefi-efi
+          path: ./artifacts
 
-      - name: Install toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang lld binutils
-
-      - name: Build EFI image
-        run: |
-          make clean
-          make
-
-      - name: Build USB tree
-        run: |
-          make usb-tree
+      - name: Package removable-media tree
+        run: tar -czf argusos-uefi-usb-tree.tar.gz -C ./artifacts EFI
 
       - name: Publish release assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            build/BOOTX64.EFI
-            EFI/BOOT/BOOTX64.EFI
+            ./artifacts/build/BOOTX64.EFI
+            ./argusos-uefi-usb-tree.tar.gz
           generate_release_notes: true

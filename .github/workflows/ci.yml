@@ -2,10 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [ main, master ]
-    tags: [ 'v*' ]
+    branches: [main, master]
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -73,6 +73,20 @@ jobs:
 
       - name: Prepare FAT32 disk image
         run: |
+          if [[ -r /usr/share/OVMF/OVMF_CODE_4M.fd && -r /usr/share/OVMF/OVMF_VARS_4M.fd ]]; then
+            ovmf_code=/usr/share/OVMF/OVMF_CODE_4M.fd
+            ovmf_vars=/usr/share/OVMF/OVMF_VARS_4M.fd
+          elif [[ -r /usr/share/OVMF/OVMF_CODE.fd && -r /usr/share/OVMF/OVMF_VARS.fd ]]; then
+            ovmf_code=/usr/share/OVMF/OVMF_CODE.fd
+            ovmf_vars=/usr/share/OVMF/OVMF_VARS.fd
+          else
+            echo "No matching OVMF code/variable-store pair found" >&2
+            exit 1
+          fi
+
+          cp "$ovmf_vars" ./OVMF_VARS.fd
+          echo "OVMF_CODE=$ovmf_code" >> "$GITHUB_ENV"
+
           mkdir -p EFI/BOOT
           cp ./artifacts/build/BOOTX64.EFI ./EFI/BOOT/BOOTX64.EFI
           truncate -s 64M efi-test.img
@@ -83,37 +97,25 @@ jobs:
 
       - name: Boot in QEMU with OVMF
         run: |
-          timeout 20s qemu-system-x86_64 \
+          set +e
+          timeout 15s qemu-system-x86_64 \
             -display none \
             -serial stdio \
             -machine accel=tcg \
             -m 1G \
-            -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE.fd \
-            -drive if=pflash,format=raw,file=/usr/share/OVMF/OVMF_VARS.fd \
+            -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
+            -drive if=pflash,format=raw,file=OVMF_VARS.fd \
             -drive if=virtio,format=raw,file=efi-test.img \
             -no-reboot \
             -monitor none \
-            -nodefaults
+            -nodefaults > qemu.log 2>&1
+          qemu_status=$?
+          set -e
 
-  release:
-    name: Publish release assets
-    if: startsWith(github.ref, 'refs/tags/')
-    needs: [ build, qemu-smoke ]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Download EFI artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: argusos-uefi-efi
-          path: ./artifacts
-
-      - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            ./artifacts/build/BOOTX64.EFI
-            ./artifacts/EFI/BOOT/BOOTX64.EFI
-          generate_release_notes: true
+          cat qemu.log
+          if [[ $qemu_status -ne 0 && $qemu_status -ne 124 ]]; then
+            echo "QEMU failed with status $qemu_status" >&2
+            exit "$qemu_status"
+          fi
+          grep -Fq "ArgusOS UEFI Study Monitor v" qemu.log
+          grep -Fq "argus64>" qemu.log

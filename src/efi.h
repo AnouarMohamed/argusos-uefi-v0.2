@@ -21,6 +21,10 @@ typedef uint8_t BOOLEAN;
 typedef void VOID;
 
 #define EFI_SUCCESS 0
+#define EFIERR(code) (0x8000000000000000ULL | (code))
+#define EFI_BAD_BUFFER_SIZE EFIERR(4)
+#define EFI_BUFFER_TOO_SMALL EFIERR(5)
+#define EFI_OUT_OF_RESOURCES EFIERR(9)
 #define EFI_ERROR(x) (((x) & (1ULL << 63)) != 0)
 
 #define EFI_TEXT_BLACK       0x00
@@ -45,6 +49,7 @@ typedef void VOID;
 #define EFI_RESET_SHUTDOWN  2
 
 #define EfiConventionalMemory 7
+#define EfiLoaderData 2
 
 typedef struct {
     uint32_t Data1;
@@ -135,8 +140,11 @@ typedef struct {
 } EFI_MEMORY_DESCRIPTOR;
 
 typedef EFI_STATUS (EFIAPI *EFI_GET_MEMORY_MAP)(UINTN *, EFI_MEMORY_DESCRIPTOR *, UINTN *, UINTN *, uint32_t *);
+typedef EFI_STATUS (EFIAPI *EFI_ALLOCATE_POOL)(uint32_t, UINTN, VOID **);
+typedef EFI_STATUS (EFIAPI *EFI_FREE_POOL)(VOID *);
 typedef EFI_STATUS (EFIAPI *EFI_WAIT_FOR_EVENT)(UINTN, EFI_EVENT *, UINTN *);
 typedef EFI_STATUS (EFIAPI *EFI_STALL)(UINTN);
+typedef EFI_STATUS (EFIAPI *EFI_SET_WATCHDOG_TIMER)(UINTN, uint64_t, UINTN, CHAR16 *);
 typedef EFI_STATUS (EFIAPI *EFI_LOCATE_PROTOCOL)(EFI_GUID *, VOID *, VOID **);
 
 typedef struct EFI_BOOT_SERVICES {
@@ -146,8 +154,8 @@ typedef struct EFI_BOOT_SERVICES {
     void *AllocatePages;
     void *FreePages;
     EFI_GET_MEMORY_MAP GetMemoryMap;
-    void *AllocatePool;
-    void *FreePool;
+    EFI_ALLOCATE_POOL AllocatePool;
+    EFI_FREE_POOL FreePool;
     void *CreateEvent;
     void *SetTimer;
     EFI_WAIT_FOR_EVENT WaitForEvent;
@@ -170,7 +178,7 @@ typedef struct EFI_BOOT_SERVICES {
     void *ExitBootServices;
     void *GetNextMonotonicCount;
     EFI_STALL Stall;
-    void *SetWatchdogTimer;
+    EFI_SET_WATCHDOG_TIMER SetWatchdogTimer;
     void *ConnectController;
     void *DisconnectController;
     void *OpenProtocol;

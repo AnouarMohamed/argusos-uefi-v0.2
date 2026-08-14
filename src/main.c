@@ -2,11 +2,20 @@
 #include "console.h"
 #include "gop.h"
 
+#define ARGUS_VERSION "0.3"
+
 static EFI_SYSTEM_TABLE *ST;
 static EFI_SIMPLE_TEXT_INPUT_PROTOCOL *IN;
 
-static unsigned char memory_map_buffer[131072];
 static char linebuf[128];
+
+typedef struct {
+    unsigned char *buffer;
+    UINTN size;
+    UINTN key;
+    UINTN descriptor_size;
+    uint32_t descriptor_version;
+} memory_map_t;
 
 extern void cpu_vendor(char out[13]);
 extern uint64_t cpu_read_tsc(void);
@@ -52,7 +61,9 @@ static int parse_u32(const char *s, uint32_t *out) {
     if (!*s) return 0;
     while (*s) {
         if (*s < '0' || *s > '9') return 0;
-        v = v * 10u + (uint32_t)(*s - '0');
+        uint32_t digit = (uint32_t)(*s - '0');
+        if (v > (UINT32_MAX - digit) / 10u) return 0;
+        v = v * 10u + digit;
         ++s;
     }
     *out = v;
@@ -111,30 +122,85 @@ static const char *memory_type_name(uint32_t t) {
     }
 }
 
-static EFI_STATUS get_memory_map(UINTN *size, UINTN *key, UINTN *desc_size, uint32_t *desc_version) {
-    *size = sizeof(memory_map_buffer);
-    return ST->BootServices->GetMemoryMap(
-        size,
-        (EFI_MEMORY_DESCRIPTOR *)memory_map_buffer,
-        key,
-        desc_size,
-        desc_version
-    );
+static EFI_STATUS acquire_memory_map(memory_map_t *map) {
+    EFI_BOOT_SERVICES *bs = ST->BootServices;
+    UINTN required = 0;
+    UINTN key = 0;
+    UINTN descriptor_size = 0;
+    uint32_t descriptor_version = 0;
+
+    map->buffer = 0;
+    map->size = 0;
+    map->key = 0;
+    map->descriptor_size = 0;
+    map->descriptor_version = 0;
+
+    EFI_STATUS status = bs->GetMemoryMap(
+        &required, 0, &key, &descriptor_size, &descriptor_version);
+    if (status != EFI_BUFFER_TOO_SMALL) return status;
+    if (descriptor_size < sizeof(EFI_MEMORY_DESCRIPTOR)) return EFI_BAD_BUFFER_SIZE;
+
+    /* Allocate extra descriptors because AllocatePool itself can grow the map. */
+    for (unsigned attempt = 0; attempt < 4; ++attempt) {
+        if (descriptor_size > (UINT64_MAX - required) / 8u)
+            return EFI_OUT_OF_RESOURCES;
+
+        UINTN capacity = required + descriptor_size * 8u;
+        VOID *buffer = 0;
+        status = bs->AllocatePool(EfiLoaderData, capacity, &buffer);
+        if (status != EFI_SUCCESS) return status;
+
+        UINTN actual_size = capacity;
+        status = bs->GetMemoryMap(
+            &actual_size,
+            (EFI_MEMORY_DESCRIPTOR *)buffer,
+            &key,
+            &descriptor_size,
+            &descriptor_version
+        );
+        if (status == EFI_SUCCESS) {
+            if (descriptor_size < sizeof(EFI_MEMORY_DESCRIPTOR) ||
+                actual_size % descriptor_size != 0) {
+                bs->FreePool(buffer);
+                return EFI_BAD_BUFFER_SIZE;
+            }
+            map->buffer = (unsigned char *)buffer;
+            map->size = actual_size;
+            map->key = key;
+            map->descriptor_size = descriptor_size;
+            map->descriptor_version = descriptor_version;
+            return EFI_SUCCESS;
+        }
+
+        bs->FreePool(buffer);
+        if (status != EFI_BUFFER_TOO_SMALL) return status;
+        required = actual_size;
+    }
+
+    return EFI_BUFFER_TOO_SMALL;
+}
+
+static void release_memory_map(memory_map_t *map) {
+    if (map->buffer) {
+        ST->BootServices->FreePool(map->buffer);
+        map->buffer = 0;
+    }
 }
 
 static void cmd_mem(void) {
-    UINTN size, key, desc_size;
-    uint32_t version;
-    EFI_STATUS s = get_memory_map(&size, &key, &desc_size, &version);
+    memory_map_t map;
+    EFI_STATUS s = acquire_memory_map(&map);
     if (s != EFI_SUCCESS) {
-        print("GetMemoryMap failed; static 128 KiB buffer may be too small.\n");
+        print("GetMemoryMap failed: 0x");
+        print_hex_u64(s, 16);
+        print("\n");
         return;
     }
 
     uint64_t conventional_pages = 0;
     uint64_t ramlike_pages = 0;
-    unsigned char *p = memory_map_buffer;
-    unsigned char *end = memory_map_buffer + size;
+    unsigned char *p = map.buffer;
+    unsigned char *end = map.buffer + map.size;
 
     while (p < end) {
         EFI_MEMORY_DESCRIPTOR *d = (EFI_MEMORY_DESCRIPTOR *)p;
@@ -142,7 +208,7 @@ static void cmd_mem(void) {
             conventional_pages += d->NumberOfPages;
         if (d->Type >= 1 && d->Type <= 10 && d->Type != 8)
             ramlike_pages += d->NumberOfPages;
-        p += desc_size;
+        p += map.descriptor_size;
     }
 
     print("Currently conventional/usable: ");
@@ -150,24 +216,26 @@ static void cmd_mem(void) {
     print(" MiB\nRAM-like pages in UEFI map: ");
     print_dec_u64((ramlike_pages * 4096ULL) / (1024ULL * 1024ULL));
     print(" MiB\nDescriptors: ");
-    print_dec_u64(size / desc_size);
+    print_dec_u64(map.size / map.descriptor_size);
     print("\n");
+    release_memory_map(&map);
 }
 
 static void cmd_memmap(void) {
-    UINTN size, key, desc_size;
-    uint32_t version;
-    EFI_STATUS s = get_memory_map(&size, &key, &desc_size, &version);
+    memory_map_t map;
+    EFI_STATUS s = acquire_memory_map(&map);
     if (s != EFI_SUCCESS) {
-        print("GetMemoryMap failed.\n");
+        print("GetMemoryMap failed: 0x");
+        print_hex_u64(s, 16);
+        print("\n");
         return;
     }
 
     print("TYPE          START               PAGES\n");
     print("-------------------------------------------\n");
     unsigned shown = 0;
-    unsigned char *p = memory_map_buffer;
-    unsigned char *end = memory_map_buffer + size;
+    unsigned char *p = map.buffer;
+    unsigned char *end = map.buffer + map.size;
     while (p < end && shown < 32) {
         EFI_MEMORY_DESCRIPTOR *d = (EFI_MEMORY_DESCRIPTOR *)p;
         const char *name = memory_type_name(d->Type);
@@ -177,10 +245,11 @@ static void cmd_memmap(void) {
         print("0x"); print_hex_u64(d->PhysicalStart, 16);
         print("  "); print_dec_u64(d->NumberOfPages);
         print("\n");
-        p += desc_size;
+        p += map.descriptor_size;
         ++shown;
     }
     if (p < end) print("... truncated to first 32 descriptors\n");
+    release_memory_map(&map);
 }
 
 static void cmd_time(void) {
@@ -261,11 +330,12 @@ static void help(void) {
 }
 
 static void about(void) {
-    print("\nArgusOS UEFI Study Monitor v0.2\n");
+    print("\nArgusOS UEFI Study Monitor v" ARGUS_VERSION "\n");
     print("x86-64 PE/COFF executable loaded directly by UEFI.\n");
     print("No libc, no host OS. CPU inspection is done in assembly.\n");
-    print("This stage intentionally keeps UEFI console/keyboard services alive.\n");
-    print("Next stage: GOP framebuffer, memory allocator, ExitBootServices, IDT/APIC.\n\n");
+    print("GOP framebuffer output is owned by Argus when available.\n");
+    print("UEFI keyboard services remain active until the kernel transition stage.\n");
+    print("Next stage: page allocator, ExitBootServices, then IDT/APIC.\n\n");
 }
 
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
@@ -273,10 +343,19 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
     ST = system_table;
     IN = ST->ConIn;
 
+    EFI_STATUS watchdog_status = EFI_SUCCESS;
+    if (ST->BootServices->SetWatchdogTimer)
+        watchdog_status = ST->BootServices->SetWatchdogTimer(0, 0, 0, 0);
+
     console_init(ST);
     console_set_color(EFI_TEXT_LIGHTGREEN);
     console_clear();
-    print("ArgusOS UEFI Study Monitor v0.3\n");
+    print("ArgusOS UEFI Study Monitor v" ARGUS_VERSION "\n");
+    if (watchdog_status != EFI_SUCCESS) {
+        print("Warning: could not disable firmware watchdog: 0x");
+        print_hex_u64(watchdog_status, 16);
+        print("\n");
+    }
     print(console_uses_framebuffer()
         ? "Argus framebuffer console online. Type 'help'.\n\n"
         : "GOP unavailable; UEFI text fallback active. Type 'help'.\n\n");

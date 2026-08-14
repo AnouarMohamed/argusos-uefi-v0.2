@@ -15,6 +15,32 @@ static unsigned bit_count(uint32_t mask) {
     return n;
 }
 
+static int mask_is_contiguous(uint32_t mask) {
+    if (!mask) return 0;
+    mask >>= bit_shift(mask);
+    return (mask & (mask + 1u)) == 0u;
+}
+
+static int pixel_format_is_usable(const EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *i) {
+    if (i->PixelFormat == PixelRedGreenBlueReserved8BitPerColor ||
+        i->PixelFormat == PixelBlueGreenRedReserved8BitPerColor)
+        return 1;
+
+    if (i->PixelFormat != PixelBitMask) return 0;
+
+    uint32_t red = i->PixelInformation.RedMask;
+    uint32_t green = i->PixelInformation.GreenMask;
+    uint32_t blue = i->PixelInformation.BlueMask;
+    uint32_t reserved = i->PixelInformation.ReservedMask;
+    uint32_t colors = red | green | blue;
+
+    return mask_is_contiguous(red) &&
+           mask_is_contiguous(green) &&
+           mask_is_contiguous(blue) &&
+           !(red & green) && !(red & blue) && !(green & blue) &&
+           !(colors & reserved);
+}
+
 static uint32_t scale_to_mask(uint8_t v, uint32_t mask) {
     if (!mask) return 0;
     unsigned shift = bit_shift(mask);
@@ -25,6 +51,7 @@ static uint32_t scale_to_mask(uint8_t v, uint32_t mask) {
 }
 
 int gop_init(EFI_SYSTEM_TABLE *st) {
+    G.usable = 0;
     EFI_GUID guid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
     void *iface = 0;
     if (!st || !st->BootServices || !st->BootServices->LocateProtocol) return 0;
@@ -41,8 +68,20 @@ int gop_init(EFI_SYSTEM_TABLE *st) {
     G.masks = i->PixelInformation;
     G.fb_base = G.proto->Mode->FrameBufferBase;
     G.fb_size = G.proto->Mode->FrameBufferSize;
+
+    if (!pixel_format_is_usable(i) ||
+        !G.width || !G.height || G.pitch_pixels < G.width ||
+        !G.fb_base || (G.fb_base & 3u))
+        return 0;
+
+    uint64_t pixel_count = (uint64_t)G.pitch_pixels * G.height;
+    if (pixel_count > UINT64_MAX / sizeof(uint32_t)) return 0;
+    uint64_t required_bytes = pixel_count * sizeof(uint32_t);
+    if (G.fb_size < required_bytes || G.fb_base > UINT64_MAX - required_bytes)
+        return 0;
+
     G.fb = (volatile uint32_t *)(uintptr_t)G.fb_base;
-    G.usable = G.fb && G.width && G.height && G.pitch_pixels && G.format != PixelBltOnly;
+    G.usable = 1;
     return G.usable;
 }
 
