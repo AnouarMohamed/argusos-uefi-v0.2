@@ -21,9 +21,9 @@ USER_CXXFLAGS = -target x86_64-none-elf -std=c++20 -ffreestanding \
 OBJS = build/main.obj build/boot.obj build/kernel.obj build/acpi.obj build/ahci.obj build/apic.obj build/block.obj \
        build/arch.obj build/compositor.obj build/desktop.obj build/heap.obj build/input.obj build/kconsole.obj \
        build/kernel_shell.obj build/memory.obj build/module.obj build/paging.obj build/fat32.obj \
-       build/pci.obj build/pmm.obj build/capability.obj build/ipc.obj build/anonymity.obj \
+       build/pci.obj build/pmm.obj build/net.obj build/capability.obj build/ipc.obj build/anonymity.obj \
        build/elf_loader.obj build/process.obj build/ps2.obj build/serial.obj \
-       build/ramfs.obj build/surface.obj build/rust_probe.obj build/rust_ramfs.obj build/rust_fat32.obj \
+       build/ramfs.obj build/surface.obj build/rust_probe.obj build/rust_ramfs.obj build/rust_fat32.obj build/rust_net.obj \
        build/uefi_memory.obj build/cpu.obj build/user_images.obj build/gop.obj build/console.obj build/font5x7.obj
 
 all: build/BOOTX64.EFI
@@ -37,7 +37,7 @@ build/main.obj: src/main.c src/efi.h src/boot.h src/console.h src/gop.h src/seri
 build/boot.obj: src/boot.c src/boot.h src/boot_info.h src/efi.h src/console.h src/gop.h src/kernel.h src/serial.h src/uefi_memory.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-build/kernel.obj: src/kernel.c src/kernel.h src/acpi.h src/ahci.h src/apic.h src/arch.h src/block.h src/boot_info.h src/fat32.h src/fat32_abi.h src/heap.h src/input.h src/kconsole.h src/kernel_shell.h src/module.h src/module_abi.h src/paging.h src/pci.h src/pmm.h src/process.h src/ramfs.h src/ramfs_abi.h | build
+build/kernel.obj: src/kernel.c src/kernel.h src/acpi.h src/ahci.h src/apic.h src/arch.h src/block.h src/boot_info.h src/fat32.h src/fat32_abi.h src/heap.h src/input.h src/kconsole.h src/kernel_shell.h src/module.h src/module_abi.h src/net.h src/net_abi.h src/paging.h src/pci.h src/pmm.h src/process.h src/ramfs.h src/ramfs_abi.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/acpi.obj: src/acpi.c src/acpi.h src/boot_info.h | build
@@ -55,7 +55,7 @@ build/block.obj: src/block.c src/block.h | build
 build/compositor.obj: src/compositor.c src/compositor.h src/gop.h src/surface.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-build/desktop.obj: src/desktop.c src/desktop.h src/anonymity.h src/apic.h src/app_abi.h src/compositor.h src/console.h src/fat32.h src/gop.h src/heap.h src/input.h src/pmm.h src/process.h src/ramfs.h src/surface.h | build
+build/desktop.obj: src/desktop.c src/desktop.h src/anonymity.h src/apic.h src/app_abi.h src/compositor.h src/console.h src/fat32.h src/gop.h src/heap.h src/input.h src/net.h src/pmm.h src/process.h src/ramfs.h src/surface.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/arch.obj: src/arch.c src/arch.h src/apic.h src/kernel.h | build
@@ -70,13 +70,13 @@ build/input.obj: src/input.c src/input.h src/acpi.h src/ps2.h src/serial.h | bui
 build/kconsole.obj: src/kconsole.c src/kconsole.h src/console.h src/serial.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-build/kernel_shell.obj: src/kernel_shell.c src/kernel_shell.h src/anonymity.h src/acpi.h src/ahci.h src/apic.h src/block.h src/boot_info.h src/desktop.h src/fat32.h src/fat32_abi.h src/heap.h src/input.h src/kconsole.h src/module.h src/module_abi.h src/paging.h src/pci.h src/pmm.h src/process.h src/ramfs.h src/ramfs_abi.h src/serial.h | build
+build/kernel_shell.obj: src/kernel_shell.c src/kernel_shell.h src/anonymity.h src/acpi.h src/ahci.h src/apic.h src/block.h src/boot_info.h src/desktop.h src/fat32.h src/fat32_abi.h src/heap.h src/input.h src/kconsole.h src/module.h src/module_abi.h src/net.h src/net_abi.h src/paging.h src/pci.h src/pmm.h src/process.h src/ramfs.h src/ramfs_abi.h src/serial.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/memory.obj: src/memory.c | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-build/module.obj: src/module.c src/module.h src/module_abi.h src/fat32_abi.h src/ramfs_abi.h | build
+build/module.obj: src/module.c src/module.h src/module_abi.h src/fat32_abi.h src/net_abi.h src/ramfs_abi.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/rust_probe.obj: src/rust_probe.rs rust-toolchain.toml | build
@@ -97,6 +97,9 @@ build/fat32.obj: src/fat32.c src/fat32.h src/fat32_abi.h src/block.h | build
 build/rust_fat32.obj: src/rust_fat32.rs rust-toolchain.toml | build
 	$(RUSTC) $(RUSTFLAGS) --crate-name argus_rust_fat32 $< -o $@
 
+build/rust_net.obj: src/rust_net.rs rust-toolchain.toml | build
+	$(RUSTC) $(RUSTFLAGS) --crate-name argus_rust_net $< -o $@
+
 build/paging.obj: src/paging.c src/paging.h src/acpi.h src/boot_info.h src/pmm.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
@@ -104,6 +107,9 @@ build/pci.obj: src/pci.c src/pci.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/pmm.obj: src/pmm.c src/pmm.h src/boot_info.h src/uefi_memory.h src/efi.h | build
+	$(CLANG) $(CFLAGS) -c $< -o $@
+
+build/net.obj: src/net.c src/net.h src/net_abi.h src/anonymity.h src/capability.h src/module.h src/pci.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/capability.obj: src/capability.c src/capability.h src/capability_abi.h | build

@@ -9,6 +9,7 @@
 #include "heap.h"
 #include "input.h"
 #include "input_keys.h"
+#include "net.h"
 #include "pmm.h"
 #include "process.h"
 #include "ramfs.h"
@@ -337,6 +338,14 @@ static void render_system(void) {
         anonymity_clearnet_allowed() ? "ALLOWED" : "DENIED",
         row
     );
+    row += line;
+    const net_info_t *network = net_info();
+    draw_pair(
+        surface,
+        "NIC",
+        network && network->quarantined ? "QUARANTINED" : "OFFLINE",
+        row
+    );
 }
 
 static void draw_file_entry(
@@ -624,7 +633,7 @@ static int initialize_surfaces(uint32_t width, uint32_t work_height) {
     uint32_t console_height = work_height >= 680u ? 560u :
         (work_height * 3u) / 4u;
     uint32_t utility_width = width >= 700u ? 400u : width - 24u;
-    uint32_t system_height = minimum(220u, work_height - 24u);
+    uint32_t system_height = minimum(238u, work_height - 24u);
     uint32_t files_height = minimum(320u, work_height - 24u);
     uint32_t applications_height = minimum(320u, work_height - 24u);
     uint32_t user_width = ARGUS_APP_SURFACE_WIDTH + 14u;

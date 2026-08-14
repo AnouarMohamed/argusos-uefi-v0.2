@@ -206,7 +206,7 @@ enough field visible for pointer movement and dragging.
 
 System and Files use the same retained surface, title, content inset, focus, and
 dragging rules as the terminal. System displays live allocator, timer, input,
-enforced network policy, and anonymous-transport state. Files displays real RAMFS
+enforced network policy, NIC quarantine, and anonymous-transport state. Files displays real RAMFS
 and FAT32 entries. They do not invent actions or
 status that the kernel cannot provide.
 

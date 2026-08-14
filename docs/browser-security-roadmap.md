@@ -30,7 +30,10 @@ in place. Delegation, signed packages, and broker processes remain required.
 
 ### 2. Network transport
 
-Status: not implemented.
+Status: the v0.21 device quarantine, role reservation, bounded Rust queues,
+strict Ethernet/IPv4/UDP/TCP validation, and small TCP state validator are in
+place. DMA confinement, live VirtIO queues, ARP/ICMP, full TCP behavior, CSPRNG
+integration, and a broker socket ABI remain required.
 
 - a memory-safe network stack where practical, with a narrow C driver boundary
 - capability-scoped NIC access owned by the kernel or a dedicated network service
@@ -110,3 +113,8 @@ browser UI, and renderers cannot receive raw-network authority; clearnet and loc
 DNS are denied; and anonymous connection requests fail unless an isolated Tor
 transport and browser network broker are both ready. See
 `docs/anonymity-boundary-v0.20.md`.
+
+ArgusOS v0.21 adds only a disconnected network foundation. The test NIC has no
+host backend and is quarantined with bus mastering and DMA disabled. Passing its
+packet and TCP-core self-tests does not authorize traffic or satisfy this gate.
+See `docs/network-foundation-v0.21.md`.

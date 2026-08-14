@@ -19,7 +19,10 @@ typedef struct {
 typedef struct {
     uint32_t device_count;
     uint32_t ahci_count;
+    uint32_t network_count;
+    uint32_t network_quarantined_count;
     pci_device_t first_ahci;
+    pci_device_t first_network;
 } pci_info_t;
 
 int pci_init(void);
@@ -27,5 +30,8 @@ int pci_self_test(void);
 const pci_info_t *pci_info(void);
 uint32_t pci_config_read32(const pci_device_t *device, uint8_t offset);
 int pci_enable_memory_bus_master(const pci_device_t *device);
+int pci_quarantine_device(const pci_device_t *device);
+uint16_t pci_device_command(const pci_device_t *device);
+int pci_device_is_quarantined(const pci_device_t *device);
 
 #endif

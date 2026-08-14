@@ -9,6 +9,7 @@
 #include "input.h"
 #include "kconsole.h"
 #include "module.h"
+#include "net.h"
 #include "pci.h"
 #include "pmm.h"
 #include "process.h"
@@ -75,6 +76,7 @@ static void print_help(void) {
     kconsole_write("  modules      validated kernel modules\n");
     kconsole_write("  processes    user process and scheduler state\n");
     kconsole_write("  security     capability and anonymity policy\n");
+    kconsole_write("  network      quarantined NIC and Rust packet core\n");
     kconsole_write("  snake        C++ user game state\n");
     kconsole_write("  userapps     ring-3 application state\n");
     kconsole_write("  appstart N   start snake, calc, or notes\n");
@@ -109,7 +111,7 @@ static void print_status(
     const acpi_info_t *acpi,
     const paging_info_t *paging
 ) {
-    kconsole_write("\nArgusOS kernel v0.20\n");
+    kconsole_write("\nArgusOS kernel v0.21\n");
     kconsole_write("Boot Services: exited\nCPUs: ");
     kconsole_write_dec(acpi->enabled_cpu_count);
     kconsole_write("\nCR3: ");
@@ -195,16 +197,66 @@ static void print_security_status(void) {
     kconsole_write(anonymity_clearnet_allowed() ? "allowed" : "denied");
     kconsole_write("\nLocal DNS: ");
     kconsole_write(anonymity_local_dns_allowed() ? "allowed" : "denied");
-    kconsole_write("\nRaw network capabilities: ");
+    kconsole_write("\nProcess raw network capabilities: ");
     kconsole_write_dec(process_raw_network_capability_count());
-    kconsole_write("\nAnonymous stream capabilities: ");
+    kconsole_write("\nProcess anonymous stream capabilities: ");
     kconsole_write_dec(process_anonymous_stream_capability_count());
     kconsole_write("\nDenied connection attempts: ");
     kconsole_write_dec(process_network_denial_count());
+    kconsole_write("\nNetwork egress: ");
+    kconsole_write(net_egress_allowed() ? "allowed" : "disabled");
     kconsole_write(process_security_boundaries_online() &&
         anonymity_transport_state() == ARGUS_ANON_TRANSPORT_OFFLINE &&
-        !anonymity_clearnet_allowed() && !anonymity_local_dns_allowed()
+        !anonymity_clearnet_allowed() && !anonymity_local_dns_allowed() &&
+        net_foundation_online() && !net_egress_allowed()
         ? "\nSECURITY_POLICY_OK\n" : "\nSECURITY_POLICY_FAIL\n");
+}
+
+static void print_network_status(void) {
+    const net_info_t *info = net_info();
+    if (!info) {
+        kconsole_write("Network foundation: unavailable\nNETWORK_FOUNDATION_FAIL\n");
+        return;
+    }
+    kconsole_write("Network foundation: ");
+    kconsole_write(net_foundation_online() ? "online" : "invalid");
+    kconsole_write("\nDiscovered NICs: ");
+    kconsole_write_dec(info->device_count);
+    kconsole_write("\nDevice: ");
+    kconsole_write(net_device_name());
+    if (info->present) {
+        kconsole_write("\nBDF: ");
+        kconsole_write_hex(info->bus);
+        kconsole_putc(':');
+        kconsole_write_hex(info->device);
+        kconsole_putc('.');
+        kconsole_write_dec(info->function);
+        kconsole_write("\nVendor/device: ");
+        kconsole_write_hex(info->vendor_id);
+        kconsole_putc('/');
+        kconsole_write_hex(info->device_id);
+    }
+    kconsole_write("\nOwner: ");
+    kconsole_write(info->present && info->virtio_modern
+        ? "Tor transport reservation" : "none");
+    kconsole_write("\nPCI state: ");
+    kconsole_write(!info->present ? "absent" :
+        info->quarantined ? "quarantined" : "not quarantined");
+    kconsole_write("\nDMA: ");
+    kconsole_write(info->dma_enabled ? "enabled" : "disabled");
+    kconsole_write("\nNIC interrupts: ");
+    kconsole_write(info->quarantined ? "disabled" : "not isolated");
+    kconsole_write("\nEgress: ");
+    kconsole_write(net_egress_allowed() ? "allowed" : "disabled");
+    kconsole_write("\nRust core: ");
+    kconsole_write(net_core_name());
+    kconsole_write("\nMaximum frame: ");
+    kconsole_write_dec(info->max_frame);
+    kconsole_write(" bytes\nQueue capacity: ");
+    kconsole_write_dec(info->queue_capacity);
+    kconsole_write(" frames per direction");
+    kconsole_write(net_foundation_online() && !net_egress_allowed()
+        ? "\nNETWORK_FOUNDATION_OK\n" : "\nNETWORK_FOUNDATION_FAIL\n");
 }
 
 static void app_lifecycle(const char *name, uint32_t operation) {
@@ -358,6 +410,10 @@ static void print_pci(void) {
     kconsole_write_dec(info->device_count);
     kconsole_write("\nAHCI controllers: ");
     kconsole_write_dec(info->ahci_count);
+    kconsole_write("\nNetwork controllers: ");
+    kconsole_write_dec(info->network_count);
+    kconsole_write("\nQuarantined network controllers: ");
+    kconsole_write_dec(info->network_quarantined_count);
     if (info->ahci_count) {
         kconsole_write("\nFirst AHCI BDF: ");
         kconsole_write_hex(info->first_ahci.bus);
@@ -565,6 +621,7 @@ static void execute_command(
     else if (strings_equal(line, "snake")) print_snake_status();
     else if (strings_equal(line, "userapps")) print_user_apps();
     else if (strings_equal(line, "security")) print_security_status();
+    else if (strings_equal(line, "network")) print_network_status();
     else if (starts_with(line, "appstart ")) app_lifecycle(line + 9, 1u);
     else if (starts_with(line, "appstop ")) app_lifecycle(line + 8, 2u);
     else if (starts_with(line, "apprestart ")) app_lifecycle(line + 11, 3u);

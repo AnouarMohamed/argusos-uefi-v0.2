@@ -52,6 +52,7 @@ jobs:
           test -s build/capability.obj
           test -s build/ipc.obj
           test -s build/anonymity.obj
+          test -s build/net.obj
           test -s build/user_snake.o
           test -s build/user_snake.elf
           test -s build/user_calculator.o
@@ -64,6 +65,7 @@ jobs:
           test -s build/rust_probe.obj
           test -s build/rust_ramfs.obj
           test -s build/rust_fat32.obj
+          test -s build/rust_net.obj
           test -z "$(nm -u build/rust_probe.obj)"
           unexpected_symbols="$(
             nm -u build/rust_ramfs.obj |
@@ -79,6 +81,14 @@ jobs:
           test -z "$fat32_symbols"
           nm -u build/rust_fat32.obj | grep -Fq "memcpy"
           nm -u build/rust_fat32.obj | grep -Fq "memset"
+          net_symbols="$(
+            nm -u build/rust_net.obj |
+              awk '$2 != "memcmp" && $2 != "memcpy" && $2 != "memset" { print $2 }'
+          )"
+          test -z "$net_symbols"
+          nm -u build/rust_net.obj | grep -Fq "memcmp"
+          nm -u build/rust_net.obj | grep -Fq "memcpy"
+          nm -u build/rust_net.obj | grep -Fq "memset"
           for app in snake calculator notes; do
             test -z "$(nm -u build/user_${app}.elf)"
             readelf -h build/user_${app}.elf | grep -Fq "0x8000001000"
@@ -134,7 +144,7 @@ jobs:
 
       - name: Validate smoke-test transcript
         run: |
-          grep -Fq "ArgusOS UEFI Study Monitor v0.20" qemu.log
+          grep -Fq "ArgusOS UEFI Study Monitor v0.21" qemu.log
           grep -Fq "ARGUS_KERNEL_ONLINE" qemu.log
           grep -Fq "BOOT_SERVICES_EXITED" qemu.log
           grep -Fq "PMM_SELF_TEST_PASS" qemu.log
@@ -149,6 +159,16 @@ jobs:
           grep -Fq "RUST_RAMFS_SELF_TEST_PASS" qemu.log
           grep -Fq "PCI_DISCOVERY_ONLINE" qemu.log
           grep -Fq "PCI_SELF_TEST_PASS" qemu.log
+          grep -Fq "Network controllers: 2" qemu.log
+          grep -Fq "Quarantined network controllers: 2" qemu.log
+          grep -Fq "NETWORK_DEVICE_BOUNDARY_ONLINE" qemu.log
+          grep -Fq "NIC_QUARANTINED" qemu.log
+          grep -Fq "VIRTIO_NET_TRANSPORT_VALID" qemu.log
+          grep -Fq "RUST_NETWORK_CORE_ONLINE" qemu.log
+          grep -Fq "PACKET_PARSER_NEGATIVE_TESTS_PASS" qemu.log
+          grep -Fq "BOUNDED_PACKET_QUEUES_PASS" qemu.log
+          grep -Fq "TCP_STATE_CORE_PASS" qemu.log
+          grep -Fq "NETWORK_EGRESS_DISABLED" qemu.log
           grep -Fq "AHCI_SATA_ONLINE" qemu.log
           grep -Fq "AHCI_IDENTIFY_PASS" qemu.log
           grep -Fq "BLOCK_DEVICE_ONLINE" qemu.log
@@ -207,9 +227,19 @@ jobs:
           grep -Fq "Anonymous transport: offline (fail closed)" qemu.log
           grep -Fq "Clearnet: denied" qemu.log
           grep -Fq "Local DNS: denied" qemu.log
-          grep -Fq "Raw network capabilities: 0" qemu.log
-          grep -Fq "Anonymous stream capabilities: 0" qemu.log
+          grep -Fq "Process raw network capabilities: 0" qemu.log
+          grep -Fq "Process anonymous stream capabilities: 0" qemu.log
+          grep -Fq "Network egress: disabled" qemu.log
           grep -Fq "SECURITY_POLICY_OK" qemu.log
+          grep -Fq "Loaded modules: 4" qemu.log
+          grep -Fq "rust.netcore (ABI 1)" qemu.log
+          grep -Fq "Device: virtio-net" qemu.log
+          grep -Fq "PCI state: quarantined" qemu.log
+          grep -Fq "DMA: disabled" qemu.log
+          grep -Fq "NIC interrupts: disabled" qemu.log
+          grep -Fq "Egress: disabled" qemu.log
+          grep -Fq "Queue capacity: 8 frames per direction" qemu.log
+          grep -Fq "NETWORK_FOUNDATION_OK" qemu.log
           grep -Fq "APP_SURFACE_ABI_OK" qemu.log
           grep -Fq "CALCULATOR_INPUT_OK" qemu.log
           grep -Fq "NOTES_INPUT_OK" qemu.log

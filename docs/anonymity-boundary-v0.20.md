@@ -84,6 +84,12 @@ The safe integration sequence is:
    and forced DNS through Tor
 7. browser network broker and isolated renderer processes
 
+ArgusOS v0.21 completes only the disconnected portion of steps 1 and 2: the NIC
+is role-reserved but quarantined with DMA disabled, and the Rust component
+provides strict packet validation, bounded queues, and a small TCP state core.
+It is not a live NIC or complete TCP service. See
+`docs/network-foundation-v0.21.md`.
+
 Arti must remain replaceable and regularly updatable. The project will not fork
 Tor cryptography or freeze an obsolete protocol implementation.
 

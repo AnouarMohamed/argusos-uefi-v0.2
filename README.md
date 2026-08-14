@@ -1,4 +1,4 @@
-# ArgusOS UEFI Study Kernel v0.20
+# ArgusOS UEFI Study Kernel v0.21
 
 A deliberately small x86-64 UEFI bare-metal study kernel.
 
@@ -39,8 +39,9 @@ kernel with framebuffer and direct COM1 output.
 - A restrained ArgusOS desktop composites seven retained windows with focus,
   z-order, damage tracking, dragging, a software pointer, and a navigable
   Applications launcher.
-- Versioned, validated C ABIs host statically linked `no_std` Rust checksum and
-  RAMFS components without giving Rust boot, allocator, interrupt, or device ownership.
+- Versioned, validated C ABIs host statically linked `no_std` Rust checksum,
+  RAMFS, FAT32, and network-core components without giving Rust boot, allocator,
+  interrupt, or device ownership.
 - A dependency-free Python host tool creates test media and drives interactive
   QEMU smoke tests through the native serial shell.
 - Physical and heap allocators run fragmentation, exhaustion, invalid-free,
@@ -73,6 +74,12 @@ kernel with framebuffer and direct COM1 output.
   stale-handle protection.
 - The anonymity policy is fail closed: clearnet and local DNS are denied, and no
   current process owns raw-network or anonymous-stream authority.
+- PCI discovery now quarantines every network function with I/O, MMIO, bus
+  mastering, DMA, and egress disabled, then validates one modern VirtIO transport.
+  A kernel-only raw-network reservation is restricted to the future Tor role.
+- A fourth `no_std` Rust component validates bounded Ethernet/IPv4/UDP/TCP input,
+  owns separate eight-frame ingress/egress queues, and checks a minimal TCP state
+  core without connecting those queues to hardware.
 - Three persistent freestanding C++20 apps run at ring 3 with no standard library,
   exceptions, RTTI, writable globals, allocator, or direct hardware access.
 - Snake, Calculator, and Notes share a versioned indexed-color surface and focused
@@ -89,11 +96,11 @@ machines whose firmware does not expose a PS/2-compatible keyboard will need an
 xHCI/USB HID driver. Storage currently supports the first 512-byte-sector LBA48
 SATA device on the first discovered AHCI controller, using polling and a one-sector
 DMA bounce buffer. There is no partition-table traversal, AHCI interrupt/NCQ path,
-hotplug, storage write path, capability delegation, networking, USB HID stack, user-space
+hotplug, storage write path, capability delegation, live network data plane, USB HID stack, user-space
 display server, or SMP startup. Console, System, Files, and the Applications
 launcher remain kernel-hosted desktop services. App ELF files are validated but
 still embedded in the EFI payload rather than loaded from signed packages. There
-is no web browser: broker processes, networking, DNS, audited TLS, renderer
+is no web browser: live TCP, broker processes, DNS, audited TLS, renderer
 isolation, and a bounded document engine must come first.
 Runtime Services memory is preserved, but the kernel does not call Runtime
 Services after the handoff.
@@ -267,7 +274,7 @@ src/kernel_shell.c native post-firmware command monitor
 src/surface.c   heap-backed retained pixel surfaces, damage bounds, text, and scroll
 src/compositor.c clipped damage composition, window positions, z-order, and hit tests
 src/desktop.c   desktop policy, pointer, task switching, and built-in utility apps
-src/memory.c    freestanding memset/memcpy/memmove primitives
+src/memory.c    freestanding memset/memcpy/memmove/memcmp primitives
 src/module_abi.h versioned cross-language descriptor and function contract
 src/module.c     C-side module validation, registry, and boot self-test
 src/rust_probe.rs bounded no_std checksum module behind ABI v1
@@ -277,6 +284,9 @@ src/rust_ramfs.rs bounded no_std RAMFS path and file-state implementation
 src/fat32_abi.h versioned C/Rust read-only FAT32 parser contract
 src/fat32.c      C-owned FAT32 state, wrapper, and cross-ABI self-tests
 src/rust_fat32.rs bounded no_std BPB, directory, and FAT-chain parser
+src/net_abi.h   versioned C/Rust packet-core and queue contract
+src/net.c       NIC ownership, VirtIO PCI validation, and fail-closed quarantine
+src/rust_net.rs bounded no_std Ethernet/IPv4/UDP/TCP validation and queues
 src/uefi_memory.c reusable memory-map allocation and validation
 src/gop.c       GOP discovery and raw framebuffer pixel operations
 src/console.c   Argus framebuffer terminal + UEFI text fallback
@@ -310,6 +320,7 @@ docs/user-apps-v0.17.md shared app ABI, launcher, applications, and limits
 docs/process-runtime-v0.19.md ELF lifecycle, fault containment, waits, and preemption
 docs/browser-security-roadmap.md mandatory security gates for Internet browsing
 docs/anonymity-boundary-v0.20.md capability, IPC, Tor-role, and fail-closed policy
+docs/network-foundation-v0.21.md quarantined NIC and Rust packet/TCP core
 PRODUCT.md      product intent, personality, anti-references, and principles
 DESIGN.md       normative ArgusOS desktop tokens and component rules
 ```
@@ -323,9 +334,9 @@ DESIGN.md       normative ArgusOS desktop tokens and component rules
 - Python owns image construction and QEMU test orchestration on the host; it is
   not part of the boot image.
 - Rust is restricted to bounded `no_std` components behind documented C ABIs.
-  It currently owns a stateless checksum and the fixed-capacity RAMFS path/file
-  state machine plus the read-only FAT32 parser used by the Files app, with no
-  allocator or hardware access.
+  It currently owns a stateless checksum, fixed-capacity RAMFS state, the
+  read-only FAT32 parser, and the fixed-capacity packet/TCP validation core. It
+  has no allocator or direct hardware access.
 - C++ owns the persistent ring-3 Snake, Calculator, and Notes applications plus
   their tiny drawing/runtime layer. It is freestanding and exception-free; the
   flat images remain statically embedded until executable loading exists.
@@ -586,10 +597,24 @@ Implemented:
 - an offline anonymity state machine that cannot jump directly to ready
 - boot and shell checks for forged capabilities, IPC bounds, and network denial
 
-The next platform work is a capability-owned NIC driver and a memory-safe packet
-and TCP service. Arti integration follows only after the required runtime, secure
-randomness, time, storage, TLS provider, and signed update path exist. The
-browser requirements are fixed in `docs/browser-security-roadmap.md`; Internet
+### Stage Q: quarantined NIC and Rust packet foundation, completed in v0.21
+
+Implemented:
+
+- isolated QEMU VirtIO NIC plus unsupported-NIC canary with no host backend
+- bounded modern VirtIO PCI capability-chain and BAR validation
+- immediate clearing and verification of PCI I/O, MMIO, and bus-master rights
+- a Tor-role-only kernel reservation that is never granted to a process
+- separate eight-frame Rust ingress and egress queues with overlap checks
+- strict Ethernet/IPv4/UDP/TCP parsing, checksums, and hostile-input tests
+- a bounded TCP lifecycle validator with explicitly documented non-goals
+- truthful System and shell diagnostics showing quarantine, DMA, and egress state
+
+The next platform work is DMA confinement and reset-safe VirtIO queue bring-up;
+the NIC remains quarantined until that gate is complete. Arti integration follows
+only after complete TCP, the required runtime, secure randomness, time, storage,
+TLS provider, and signed updates exist. The browser requirements are fixed in
+`docs/browser-security-roadmap.md`; Internet
 access stays disabled until those security gates are met.
 
 ## Exercises
@@ -612,8 +637,9 @@ monitor**. The initial monitor is firmware-backed; the monitor reached through
 and no longer uses Boot Services. Guard pages and an IST-backed double-fault path
 contain early stack failures, while a volatile Rust RAMFS supplies the first file
 namespace and a read-only Rust parser consumes sectors from the first block-device
-contract. It is a real kernel boundary, while still being far from a
-general-purpose OS. Its graphical desktop now has retained surfaces, four
+contract. A quarantined NIC and Rust packet core now provide a deliberately
+disconnected network foundation. It is a real kernel boundary, while still being
+far from a general-purpose OS. Its graphical desktop now has retained surfaces, four
 kernel-hosted service windows, three persistent C++ ring-3 apps, a launcher,
 focus, z-order, and damage-aware movement. It is a real early multi-process GUI,
-but it does not yet have dynamic application loading or fault containment.
+with dynamic application lifecycle and user-fault containment.

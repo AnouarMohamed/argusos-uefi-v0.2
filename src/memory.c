@@ -29,3 +29,13 @@ void *memmove(void *destination, const void *source, size_t count) {
     }
     return destination;
 }
+
+int memcmp(const void *left, const void *right, size_t count) {
+    const uint8_t *first = (const uint8_t *)left;
+    const uint8_t *second = (const uint8_t *)right;
+    for (size_t i = 0; i < count; ++i) {
+        if (first[i] < second[i]) return -1;
+        if (first[i] > second[i]) return 1;
+    }
+    return 0;
+}

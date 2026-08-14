@@ -10,6 +10,7 @@
 #include "kconsole.h"
 #include "kernel_shell.h"
 #include "module.h"
+#include "net.h"
 #include "paging.h"
 #include "pci.h"
 #include "pmm.h"
@@ -82,7 +83,7 @@ void kernel_exception_panic(
 void kernel_main(const boot_info_t *boot_info) {
     kconsole_clear();
 
-    kprint("ArgusOS kernel v0.20\n");
+    kprint("ArgusOS kernel v0.21\n");
     kprint("ARGUS_KERNEL_ONLINE\n");
 
     if (!boot_info || boot_info->magic != ARGUS_BOOT_INFO_MAGIC ||
@@ -174,7 +175,39 @@ void kernel_main(const boot_info_t *boot_info) {
     kprint_dec(pci->device_count);
     kprint("\nAHCI controllers: ");
     kprint_dec(pci->ahci_count);
+    kprint("\nNetwork controllers: ");
+    kprint_dec(pci->network_count);
+    kprint("\nQuarantined network controllers: ");
+    kprint_dec(pci->network_quarantined_count);
     kprint("\nPCI_SELF_TEST_PASS\n");
+
+    if (!net_init(pci) || !net_self_test())
+        panic("network foundation self-test failed");
+    const net_info_t *network = net_info();
+    if (!network) panic("network foundation unavailable");
+    kprint("NETWORK_DEVICE_BOUNDARY_ONLINE\nNetwork device: ");
+    kprint(net_device_name());
+    kprint("\nNetwork core: ");
+    kprint(net_core_name());
+    kprint("\nPacket bytes: ");
+    kprint_dec(network->max_frame);
+    kprint("\nQueue capacity: ");
+    kprint_dec(network->queue_capacity);
+    kprint(" frames per direction\n");
+    if (network->present) {
+        kprint(network->quarantined
+            ? "NIC_QUARANTINED\n" : "NIC_QUARANTINE_FAILED\n");
+        kprint(network->virtio_modern
+            ? "VIRTIO_NET_TRANSPORT_VALID\n"
+            : "NETWORK_DEVICE_UNSUPPORTED\n");
+    } else {
+        kprint("NETWORK_DEVICE_ABSENT\n");
+    }
+    kprint("RUST_NETWORK_CORE_ONLINE\n");
+    kprint("PACKET_PARSER_NEGATIVE_TESTS_PASS\n");
+    kprint("BOUNDED_PACKET_QUEUES_PASS\n");
+    kprint("TCP_STATE_CORE_PASS\n");
+    kprint("NETWORK_EGRESS_DISABLED\n");
 
     if (pci->ahci_count &&
         ahci_init(&pci->first_ahci, &paging) &&
@@ -233,7 +266,7 @@ void kernel_main(const boot_info_t *boot_info) {
     kprint("APIC_TIMER_TICK\n");
 
     if (!process_run_self_test()) panic("user process self-test failed");
-    if (!process_security_boundaries_online())
+    if (!process_security_boundaries_online() || !net_foundation_online())
         panic("security boundary self-test failed");
     kprint("USER_RING3_ONLINE\n");
     kprint("SYSCALL_SYSRET_ONLINE\n");
