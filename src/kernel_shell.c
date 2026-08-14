@@ -3,6 +3,7 @@
 #include "heap.h"
 #include "input.h"
 #include "kconsole.h"
+#include "module.h"
 #include "pmm.h"
 
 extern void cpu_halt_forever(void) __attribute__((noreturn));
@@ -42,6 +43,7 @@ static void print_help(void) {
     kconsole_write("  heap         heap statistics\n");
     kconsole_write("  heaptest     rerun allocator checks\n");
     kconsole_write("  alloc N      allocate, verify, and free N bytes\n");
+    kconsole_write("  modules      validated kernel modules\n");
     kconsole_write("  ticks        local-APIC timer ticks\n");
     kconsole_write("  input        native input backends\n");
     kconsole_write("  clear        clear framebuffer/terminal\n");
@@ -55,7 +57,7 @@ static void print_status(
     const acpi_info_t *acpi,
     const paging_info_t *paging
 ) {
-    kconsole_write("\nArgusOS kernel v0.6\n");
+    kconsole_write("\nArgusOS kernel v0.7\n");
     kconsole_write("Boot Services: exited\nCPUs: ");
     kconsole_write_dec(acpi->enabled_cpu_count);
     kconsole_write("\nCR3: ");
@@ -71,6 +73,22 @@ static void print_status(
         kconsole_write("unavailable");
     }
     kconsole_write("\nSTATUS_OK\n");
+}
+
+static void print_modules(void) {
+    uint64_t count = module_count();
+    kconsole_write("Loaded modules: ");
+    kconsole_write_dec(count);
+    kconsole_write("\n");
+    for (uint64_t i = 0; i < count; ++i) {
+        const argus_module_v1_t *module = module_at(i);
+        kconsole_write("  ");
+        kconsole_write(module->name);
+        kconsole_write(" (ABI ");
+        kconsole_write_dec(module->abi_version);
+        kconsole_write(")\n");
+    }
+    kconsole_write("MODULES_OK\n");
 }
 
 static void print_memory(void) {
@@ -127,6 +145,7 @@ static void execute_command(
     else if (strings_equal(line, "heaptest"))
         kconsole_write(heap_self_test() ? "HEAP_SELF_TEST_PASS\n" : "HEAP_SELF_TEST_FAIL\n");
     else if (starts_with(line, "alloc ")) allocation_probe(line + 6);
+    else if (strings_equal(line, "modules")) print_modules();
     else if (strings_equal(line, "ticks")) {
         kconsole_write("APIC ticks: ");
         kconsole_write_dec(apic_timer_ticks());

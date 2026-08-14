@@ -29,14 +29,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang lld binutils
 
+      - name: Install Rust module target
+        run: |
+          rustup toolchain install 1.97.1 --profile minimal \
+            --target x86_64-pc-windows-msvc
+          rustc --version
+
       - name: Build EFI image
         run: |
           make clean
+          make host-check
           make CFLAGS="$CFLAGS"
 
       - name: Validate EFI output
         run: |
           test -s build/BOOTX64.EFI
+          test -s build/rust_probe.obj
+          test -z "$(nm -u build/rust_probe.obj)"
           file build/BOOTX64.EFI
           ls -l build/BOOTX64.EFI
 
@@ -61,6 +70,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Check out host tooling
+        uses: actions/checkout@v4
+
       - name: Download EFI artifact
         uses: actions/download-artifact@v4
         with:
@@ -71,82 +83,29 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            qemu-system-x86 ovmf dosfstools mtools expect
-
-      - name: Prepare FAT32 disk image
-        run: |
-          if [[ -r /usr/share/OVMF/OVMF_CODE_4M.fd \
-             && -r /usr/share/OVMF/OVMF_VARS_4M.fd ]]; then
-            ovmf_code=/usr/share/OVMF/OVMF_CODE_4M.fd
-            ovmf_vars=/usr/share/OVMF/OVMF_VARS_4M.fd
-          elif [[ -r /usr/share/OVMF/OVMF_CODE.fd \
-               && -r /usr/share/OVMF/OVMF_VARS.fd ]]; then
-            ovmf_code=/usr/share/OVMF/OVMF_CODE.fd
-            ovmf_vars=/usr/share/OVMF/OVMF_VARS.fd
-          else
-            echo "No matching OVMF code/variable-store pair found" >&2
-            exit 1
-          fi
-
-          cp "$ovmf_vars" ./OVMF_VARS.fd
-          echo "OVMF_CODE=$ovmf_code" >> "$GITHUB_ENV"
-
-          mkdir -p EFI/BOOT
-          cp ./artifacts/build/BOOTX64.EFI ./EFI/BOOT/BOOTX64.EFI
-          truncate -s 64M efi-test.img
-          mkfs.fat -F32 efi-test.img
-          mmd -i efi-test.img ::/EFI
-          mmd -i efi-test.img ::/EFI/BOOT
-          mcopy -i efi-test.img ./EFI/BOOT/BOOTX64.EFI ::/EFI/BOOT/BOOTX64.EFI
+            python3 qemu-system-x86 ovmf dosfstools mtools
 
       - name: Boot in QEMU with OVMF
         run: |
-          expect <<'EOF'
-          log_file -noappend qemu.log
-          set timeout 20
-          spawn qemu-system-x86_64 \
-            -display none \
-            -serial stdio \
-            -machine accel=tcg \
-            -m 1G \
-            -drive if=pflash,format=raw,readonly=on,file=$env(OVMF_CODE) \
-            -drive if=pflash,format=raw,file=OVMF_VARS.fd \
-            -drive if=virtio,format=raw,file=efi-test.img \
-            -no-reboot \
-            -monitor none \
-            -nodefaults
-          expect -exact "argus64> "
-          send "boot\r"
-          expect -exact "ARGUS_KERNEL_ONLINE"
-          expect -exact "BOOT_SERVICES_EXITED"
-          expect -exact "PMM_SELF_TEST_PASS"
-          expect -exact "ACPI_MADT_ONLINE"
-          expect -exact "PAGING_ONLINE"
-          expect -exact "HEAP_SELF_TEST_PASS"
-          expect -exact "GDT_IDT_ONLINE"
-          expect -exact "APIC_TIMER_TICK"
-          expect -exact "KERNEL_SHELL_READY"
-          expect -exact "argus-kernel> "
-          send "status\r"
-          expect -exact "STATUS_OK"
-          expect -exact "argus-kernel> "
-          send "alloc 4096\r"
-          expect -exact "ALLOC_OK"
-          set qemu_pid [exp_pid]
-          exec kill $qemu_pid
-          expect eof
-          EOF
+          python3 tools/argus.py smoke \
+            --efi artifacts/build/BOOTX64.EFI \
+            --memory 1G \
+            --log qemu.log
 
-          cat qemu.log
-          grep -Fq "ArgusOS UEFI Study Monitor v0.6" qemu.log
+      - name: Validate smoke-test transcript
+        run: |
+          grep -Fq "ArgusOS UEFI Study Monitor v0.7" qemu.log
           grep -Fq "ARGUS_KERNEL_ONLINE" qemu.log
           grep -Fq "BOOT_SERVICES_EXITED" qemu.log
           grep -Fq "PMM_SELF_TEST_PASS" qemu.log
           grep -Fq "ACPI_MADT_ONLINE" qemu.log
           grep -Fq "PAGING_ONLINE" qemu.log
           grep -Fq "HEAP_SELF_TEST_PASS" qemu.log
+          grep -Fq "MODULE_ABI_V1_ONLINE" qemu.log
+          grep -Fq "RUST_MODULE_SELF_TEST_PASS" qemu.log
           grep -Fq "GDT_IDT_ONLINE" qemu.log
           grep -Fq "APIC_TIMER_TICK" qemu.log
           grep -Fq "KERNEL_SHELL_READY" qemu.log
           grep -Fq "STATUS_OK" qemu.log
+          grep -Fq "MODULES_OK" qemu.log
           grep -Fq "ALLOC_OK" qemu.log

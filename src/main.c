@@ -4,7 +4,7 @@
 #include "gop.h"
 #include "uefi_memory.h"
 
-#define ARGUS_VERSION "0.6"
+#define ARGUS_VERSION "0.7"
 
 static EFI_SYSTEM_TABLE *ST;
 static EFI_SIMPLE_TEXT_INPUT_PROTOCOL *IN;
@@ -268,7 +268,8 @@ static void about(void) {
     print("GOP framebuffer output is owned by Argus when available.\n");
     print("The boot command enters an Argus-owned memory and interrupt environment.\n");
     print("The post-firmware kernel provides native serial/PS2 input and a heap.\n");
-    print("Next stage: host tooling and the first carefully bounded Rust module.\n\n");
+    print("Python owns repeatable host tests; one no_std Rust module uses ABI v1.\n");
+    print("Next stage: allocator hardening and interrupt-routing tests.\n\n");
 }
 
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {

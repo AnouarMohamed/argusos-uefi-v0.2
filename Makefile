@@ -1,11 +1,18 @@
 CLANG ?= clang
 LLD   ?= lld-link
+RUSTC ?= rustc
+PYTHON ?= python3
 CFLAGS = -target x86_64-pc-win32-coff -ffreestanding -fshort-wchar -mno-red-zone \
          -fno-stack-protector -fno-builtin -Wall -Wextra -O2
+RUST_TARGET = x86_64-pc-windows-msvc
+RUSTFLAGS = --target $(RUST_TARGET) --crate-name argus_rust_probe \
+            --crate-type lib --emit=obj --edition=2021 -D warnings -C panic=abort \
+            -C opt-level=2 -C overflow-checks=yes
 
 OBJS = build/main.obj build/boot.obj build/kernel.obj build/acpi.obj build/apic.obj \
        build/arch.obj build/heap.obj build/input.obj build/kconsole.obj \
-       build/kernel_shell.obj build/paging.obj build/pmm.obj build/ps2.obj build/serial.obj \
+       build/kernel_shell.obj build/module.obj build/rust_probe.obj build/paging.obj \
+       build/pmm.obj build/ps2.obj build/serial.obj \
        build/uefi_memory.obj build/cpu.obj build/gop.obj build/console.obj build/font5x7.obj
 
 all: build/BOOTX64.EFI
@@ -19,7 +26,7 @@ build/main.obj: src/main.c src/efi.h src/boot.h src/console.h src/gop.h src/uefi
 build/boot.obj: src/boot.c src/boot.h src/boot_info.h src/efi.h src/console.h src/gop.h src/kernel.h src/serial.h src/uefi_memory.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-build/kernel.obj: src/kernel.c src/kernel.h src/acpi.h src/apic.h src/arch.h src/boot_info.h src/heap.h src/kconsole.h src/kernel_shell.h src/paging.h src/pmm.h | build
+build/kernel.obj: src/kernel.c src/kernel.h src/acpi.h src/apic.h src/arch.h src/boot_info.h src/heap.h src/kconsole.h src/kernel_shell.h src/module.h src/module_abi.h src/paging.h src/pmm.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/acpi.obj: src/acpi.c src/acpi.h src/boot_info.h | build
@@ -40,8 +47,14 @@ build/input.obj: src/input.c src/input.h src/ps2.h src/serial.h | build
 build/kconsole.obj: src/kconsole.c src/kconsole.h src/console.h src/serial.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-build/kernel_shell.obj: src/kernel_shell.c src/kernel_shell.h src/acpi.h src/apic.h src/boot_info.h src/heap.h src/input.h src/kconsole.h src/paging.h src/pmm.h | build
+build/kernel_shell.obj: src/kernel_shell.c src/kernel_shell.h src/acpi.h src/apic.h src/boot_info.h src/heap.h src/input.h src/kconsole.h src/module.h src/module_abi.h src/paging.h src/pmm.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
+
+build/module.obj: src/module.c src/module.h src/module_abi.h | build
+	$(CLANG) $(CFLAGS) -c $< -o $@
+
+build/rust_probe.obj: src/rust_probe.rs rust-toolchain.toml | build
+	$(RUSTC) $(RUSTFLAGS) $< -o $@
 
 build/paging.obj: src/paging.c src/paging.h src/acpi.h src/boot_info.h src/pmm.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
@@ -78,7 +91,16 @@ usb-tree: build/BOOTX64.EFI
 	mkdir -p EFI/BOOT
 	cp build/BOOTX64.EFI EFI/BOOT/BOOTX64.EFI
 
+test-image: build/BOOTX64.EFI
+	$(PYTHON) tools/argus.py image --efi $< --output build/argus-test.img
+
+smoke: build/BOOTX64.EFI
+	$(PYTHON) tools/argus.py smoke --efi $<
+
+host-check: | build
+	PYTHONPYCACHEPREFIX=build/pycache $(PYTHON) -m py_compile tools/argus.py
+
 clean:
 	rm -rf build EFI/BOOT/BOOTX64.EFI
 
-.PHONY: all clean usb-tree
+.PHONY: all clean host-check smoke test-image usb-tree

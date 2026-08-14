@@ -4,6 +4,8 @@ EFI/BOOT/
 *.efi
 *.obj
 *.o
+__pycache__/
+*.pyc
 
 # Editor / OS noise
 .vscode/

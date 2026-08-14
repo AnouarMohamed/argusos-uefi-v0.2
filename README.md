@@ -1,4 +1,4 @@
-# ArgusOS UEFI Study Kernel v0.6
+# ArgusOS UEFI Study Kernel v0.7
 
 A deliberately small x86-64 UEFI bare-metal study kernel.
 
@@ -34,6 +34,10 @@ kernel with framebuffer and direct COM1 output.
   Enter, Backspace, and Tab without firmware services.
 - A post-firmware kernel monitor accepts commands through COM1 or PS/2 while
   rendering to the framebuffer and serial terminal.
+- A versioned, validated C module ABI hosts one statically linked `no_std` Rust
+  checksum module without giving it boot, allocator, interrupt, or device ownership.
+- A dependency-free Python host tool creates test media and drives interactive
+  QEMU smoke tests through the native serial shell.
 
 ## What is *not* implemented yet?
 
@@ -46,7 +50,9 @@ Services after the handoff.
 
 ## Build
 
-Requires Clang 17-ish and `lld-link`:
+Requires Python 3.10+, Clang 17-ish, `lld-link`, and Rust 1.97.1 with the
+`x86_64-pc-windows-msvc` target. The checked-in `rust-toolchain.toml` configures
+Rust automatically when `rustup` is available:
 
 ```sh
 make
@@ -61,7 +67,18 @@ build/BOOTX64.EFI
 CI performs the same freestanding build with warnings treated as errors, creates
 a FAT32 boot image, boots it with QEMU/OVMF, enters `boot`, and requires explicit
 post-firmware, allocator, paging, IDT, APIC-timer, and kernel-shell markers. It
-then drives the native COM1 input path and verifies `status` and `alloc 4096`.
+then drives the native COM1 input path and verifies `status`, `modules`, and
+`alloc 4096`.
+The media creation, OVMF discovery, serial synchronization, and shell probes are
+implemented by `tools/argus.py` instead of inline CI shell/Expect logic.
+
+Useful host targets:
+
+```sh
+make host-check  # syntax-check the Python host tool
+make test-image  # create build/argus-test.img
+make smoke       # build, boot QEMU/OVMF, and probe the native shell
+```
 
 To create the removable-media directory structure:
 
@@ -121,6 +138,7 @@ mem
 heap
 heaptest
 alloc 4096
+modules
 ticks
 input
 clear
@@ -148,24 +166,30 @@ src/ps2.c       native PS/2 Set-1 keyboard decoder
 src/input.c     unified nonblocking COM1/PS2 input selection
 src/kconsole.c  post-firmware framebuffer/serial console
 src/kernel_shell.c native post-firmware command monitor
+src/module_abi.h versioned cross-language descriptor and function contract
+src/module.c     C-side module validation, registry, and boot self-test
+src/rust_probe.rs bounded no_std checksum module behind ABI v1
 src/uefi_memory.c reusable memory-map allocation and validation
 src/gop.c       GOP discovery and raw framebuffer pixel operations
 src/console.c   Argus framebuffer terminal + UEFI text fallback
 src/font5x7.c   tiny built-in 5x7 terminal font
 src/cpu.S       CPU instructions, stack switch, and interrupt entry stubs
 Makefile        freestanding PE/COFF build
+tools/argus.py  FAT image creation and interactive QEMU smoke runner
+docs/module-abi-v1.md ownership, layout, failure, and versioning contract
 ```
 
 ## Language policy
 
 - C owns the kernel, allocators, parsers, consoles, and early drivers.
 - x86-64 assembly is limited to instructions and transitions C cannot express safely.
-- Make and shell own the host build and test workflow.
-- Python is the next language to introduce, for image inspection, test
-  orchestration, and other host-side tooling where shell becomes brittle.
-- Rust should begin as one bounded freestanding kernel module only after the C
-  ABI boundary is documented and covered by boot tests. The heap, input, and
-  interrupt foundations needed for that experiment now exist.
+- Make coordinates the host build while Python owns stateful test orchestration.
+- Python owns image construction and QEMU test orchestration on the host; it is
+  not part of the boot image.
+- Rust is restricted to bounded `no_std` modules behind the documented C ABI.
+  The first module is a stateless checksum probe with no allocator or hardware access.
+- Boot, page tables, allocators, interrupt control, and device ownership remain
+  in C and x86-64 assembly until a later ABI explicitly and safely exposes them.
 - Do not add languages merely by subsystem count: every language adds a
   compiler, runtime, ABI, debugging, and CI maintenance surface.
 
@@ -235,16 +259,27 @@ keyboard through an embedded controller, PS/2 compatibility, or USB/xHCI paths
 depending on firmware/hardware. A robust modern-PC OS eventually needs USB
 host-controller and HID work.
 
-### Stage G — next: repeatable tooling and a stable internal ABI
+### Stage G — completed in v0.7: tooling and a bounded second kernel language
+
+Implemented:
+
+- a standard-library-only Python tool for FAT32 image creation and QEMU orchestration
+- automatic OVMF discovery, serial marker timeouts, transcripts, and shell probes
+- a fixed-size, versioned C module descriptor with documented ownership rules
+- C-side descriptor validation and a deterministic cross-language boot self-test
+- one statically linked `no_std` Rust FNV-1a module targeting Microsoft x64 COFF
+- a `modules` shell command and CI markers proving the Rust code executed
+
+### Stage H — next: hardening the foundations
 
 Recommended order:
 
-1. move QEMU image creation and interactive smoke tests into a small Python tool
-2. document subsystem ownership, error conventions, and the C ABI exposed to modules
-3. add allocator fragmentation/exhaustion tests and an interrupt-routing test harness
-4. introduce one `no_std` Rust module behind that ABI, keeping boot and architecture transitions in C/assembly
+1. allocator fragmentation, exhaustion, invalid-free, and randomized invariant tests
+2. an interrupt-routing harness followed by IRQ-driven PS/2 input
+3. an IST-backed double-fault path and a kernel-stack guard page
+4. Python-driven negative boot tests that require specific panic diagnostics
 
-### Stage H — storage/files
+### Stage I — storage/files
 Recommended order:
 
 1. simple RAM filesystem
@@ -252,7 +287,7 @@ Recommended order:
 3. AHCI/SATA exploration
 4. NVMe driver
 
-### Stage I — processes
+### Stage J — processes
 Implement:
 
 - ring 3

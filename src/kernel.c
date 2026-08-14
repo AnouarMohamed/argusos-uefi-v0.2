@@ -5,6 +5,7 @@
 #include "heap.h"
 #include "kconsole.h"
 #include "kernel_shell.h"
+#include "module.h"
 #include "paging.h"
 #include "pmm.h"
 
@@ -88,7 +89,7 @@ static int allocator_self_test(void) {
 void kernel_main(const boot_info_t *boot_info) {
     kconsole_clear();
 
-    kprint("ArgusOS kernel v0.6\n");
+    kprint("ArgusOS kernel v0.7\n");
     kprint("ARGUS_KERNEL_ONLINE\n");
 
     if (!boot_info || boot_info->magic != ARGUS_BOOT_INFO_MAGIC ||
@@ -148,6 +149,13 @@ void kernel_main(const boot_info_t *boot_info) {
     kprint("HEAP_SELF_TEST_PASS\nHeap capacity: ");
     kprint_dec(heap_total_bytes());
     kprint(" bytes\n");
+
+    if (!module_init()) panic("module ABI validation failed");
+    kprint("MODULE_ABI_V1_ONLINE\nRust module: ");
+    kprint(module_at(0)->name);
+    kprint("\n");
+    if (!module_self_test()) panic("Rust module self-test failed");
+    kprint("RUST_MODULE_SELF_TEST_PASS\n");
 
     arch_init();
     kprint("GDT_IDT_ONLINE\n");
