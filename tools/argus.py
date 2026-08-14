@@ -31,6 +31,10 @@ BOOT_MARKERS = (
     b"RUST_MODULE_SELF_TEST_PASS",
     b"RAMFS_ABI_V1_ONLINE",
     b"RUST_RAMFS_SELF_TEST_PASS",
+    b"BLOCK_DEVICE_ONLINE",
+    b"BLOCK_DEVICE_SELF_TEST_PASS",
+    b"FAT32_ABI_V1_ONLINE",
+    b"RUST_FAT32_SELF_TEST_PASS",
     b"GDT_IDT_ONLINE",
     b"DOUBLE_FAULT_IST_ONLINE",
     b"APIC_TIMER_TICK",
@@ -50,6 +54,11 @@ SHELL_PROBES = (
     (b"cat /qemu.txt\r", b"Rust RAMFS round trip"),
     (b"rm /qemu.txt\r", b"RAMFS_REMOVE_OK"),
     (b"cat /qemu.txt\r", b"RAMFS error: not found"),
+    (b"disks\r", b"BLOCK_STATUS_OK"),
+    (b"fatinfo\r", b"FAT32_STATUS_OK"),
+    (b"fatls\r", b"FAT32_LIST_OK"),
+    (b"fatcat /hello.txt\r", b"FAT32_CAT_OK"),
+    (b"fatcat /MISSING.TXT\r", b"FAT32 error: not found"),
 )
 FAULT_CASES = {
     "breakpoint": (

@@ -1,5 +1,7 @@
 #include "kernel_shell.h"
 #include "apic.h"
+#include "block.h"
+#include "fat32.h"
 #include "heap.h"
 #include "input.h"
 #include "kconsole.h"
@@ -10,6 +12,8 @@
 extern void cpu_halt_forever(void) __attribute__((noreturn));
 extern void cpu_trigger_breakpoint(void);
 extern void cpu_wait_for_interrupt(void);
+
+static uint8_t fat32_cat_buffer[ARGUS_FAT32_MAX_READ];
 
 static int strings_equal(const char *a, const char *b) {
     while (*a && *b && *a == *b) { ++a; ++b; }
@@ -51,6 +55,10 @@ static void print_help(void) {
     kconsole_write("  cat PATH     print a RAMFS file\n");
     kconsole_write("  write P TEXT create or replace a RAMFS file\n");
     kconsole_write("  rm PATH      remove a RAMFS file\n");
+    kconsole_write("  disks        block-device statistics\n");
+    kconsole_write("  fatinfo      mounted FAT32 geometry\n");
+    kconsole_write("  fatls        list FAT32 root files\n");
+    kconsole_write("  fatcat PATH  print a FAT32 root file\n");
     kconsole_write("  ticks        local-APIC timer ticks\n");
     kconsole_write("  input        native input backends\n");
     kconsole_write("  irqtest      confirm IRQ keyboard command delivery\n");
@@ -65,7 +73,7 @@ static void print_status(
     const acpi_info_t *acpi,
     const paging_info_t *paging
 ) {
-    kconsole_write("\nArgusOS kernel v0.9\n");
+    kconsole_write("\nArgusOS kernel v0.10\n");
     kconsole_write("Boot Services: exited\nCPUs: ");
     kconsole_write_dec(acpi->enabled_cpu_count);
     kconsole_write("\nCR3: ");
@@ -189,6 +197,102 @@ static void remove_ramfs(const char *path) {
     else print_ramfs_error(status);
 }
 
+static void print_fat32_error(int32_t status) {
+    kconsole_write("FAT32 error: ");
+    if (status == ARGUS_FAT32_NOT_FOUND) kconsole_write("not found");
+    else if (status == ARGUS_FAT32_INVALID) kconsole_write("invalid path or argument");
+    else if (status == ARGUS_FAT32_UNSUPPORTED) kconsole_write("unsupported feature");
+    else if (status == ARGUS_FAT32_CORRUPT) kconsole_write("corrupt filesystem");
+    else if (status == ARGUS_FAT32_IO_ERROR) kconsole_write("block I/O failure");
+    else if (status == ARGUS_FAT32_BUFFER_TOO_SMALL) kconsole_write("file too large");
+    else kconsole_write("ABI failure");
+    kconsole_write("\n");
+}
+
+static void print_disks(void) {
+    const argus_block_device_v1_t *device = block_default_device();
+    if (!device) {
+        kconsole_write("No block device.\n");
+        return;
+    }
+    kconsole_write("Device: ");
+    kconsole_write(device->name);
+    kconsole_write("\nSector bytes: ");
+    kconsole_write_dec(device->sector_size);
+    kconsole_write("\nSectors: ");
+    kconsole_write_dec(device->sector_count);
+    kconsole_write("\nBLOCK_STATUS_OK\n");
+}
+
+static void print_fat32_info(void) {
+    argus_fat32_info_v1_t info;
+    int32_t status = fat32_info(&info);
+    if (status != ARGUS_FAT32_OK) {
+        print_fat32_error(status);
+        return;
+    }
+    kconsole_write("Bytes/sector: ");
+    kconsole_write_dec(info.bytes_per_sector);
+    kconsole_write("\nSectors/cluster: ");
+    kconsole_write_dec(info.sectors_per_cluster);
+    kconsole_write("\nData clusters: ");
+    kconsole_write_dec(info.data_clusters);
+    kconsole_write("\nRoot cluster: ");
+    kconsole_write_dec(info.root_cluster);
+    kconsole_write("\nFAT32_STATUS_OK\n");
+}
+
+static void list_fat32(void) {
+    char path[ARGUS_FAT32_MAX_PATH + 1u];
+    uint64_t path_length;
+    uint64_t file_size;
+    uint32_t attributes;
+    for (uint64_t index = 0; index < 128u; ++index) {
+        int32_t status = fat32_entry(
+            index,
+            path,
+            sizeof(path),
+            &path_length,
+            &file_size,
+            &attributes
+        );
+        if (status == ARGUS_FAT32_NOT_FOUND) {
+            kconsole_write("FAT32_LIST_OK\n");
+            return;
+        }
+        if (status != ARGUS_FAT32_OK) {
+            print_fat32_error(status);
+            return;
+        }
+        kconsole_write(path);
+        kconsole_write("  ");
+        kconsole_write_dec(file_size);
+        kconsole_write(attributes & 0x10u ? " bytes [dir]\n" : " bytes\n");
+    }
+    kconsole_write("FAT32 error: root listing limit reached\n");
+}
+
+static void cat_fat32(const char *path) {
+    uint64_t length = 0;
+    int32_t status = fat32_read(
+        path,
+        fat32_cat_buffer,
+        sizeof(fat32_cat_buffer),
+        &length
+    );
+    if (status != ARGUS_FAT32_OK) {
+        print_fat32_error(status);
+        return;
+    }
+    for (uint64_t index = 0; index < length; ++index) {
+        uint8_t byte = fat32_cat_buffer[index];
+        kconsole_putc(byte == '\n' || byte == '\t' ||
+                      (byte >= 32u && byte <= 126u) ? (char)byte : '.');
+    }
+    if (!length || fat32_cat_buffer[length - 1u] != '\n') kconsole_putc('\n');
+    kconsole_write("FAT32_CAT_OK\n");
+}
+
 static void print_memory(void) {
     kconsole_write("Managed pages: ");
     kconsole_write_dec(pmm_managed_pages());
@@ -252,6 +356,10 @@ static void execute_command(
     else if (starts_with(line, "cat ")) cat_ramfs(line + 4);
     else if (starts_with(line, "write ")) write_ramfs(line + 6);
     else if (starts_with(line, "rm ")) remove_ramfs(line + 3);
+    else if (strings_equal(line, "disks")) print_disks();
+    else if (strings_equal(line, "fatinfo")) print_fat32_info();
+    else if (strings_equal(line, "fatls")) list_fat32();
+    else if (starts_with(line, "fatcat ")) cat_fat32(line + 7);
     else if (strings_equal(line, "ticks")) {
         kconsole_write("APIC ticks: ");
         kconsole_write_dec(apic_timer_ticks());

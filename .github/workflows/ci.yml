@@ -46,6 +46,7 @@ jobs:
           test -s build/BOOTX64.EFI
           test -s build/rust_probe.obj
           test -s build/rust_ramfs.obj
+          test -s build/rust_fat32.obj
           test -z "$(nm -u build/rust_probe.obj)"
           unexpected_symbols="$(
             nm -u build/rust_ramfs.obj |
@@ -54,6 +55,13 @@ jobs:
           test -z "$unexpected_symbols"
           nm -u build/rust_ramfs.obj | grep -Fq "memcpy"
           nm -u build/rust_ramfs.obj | grep -Fq "memset"
+          fat32_symbols="$(
+            nm -u build/rust_fat32.obj |
+              awk '$2 != "memcpy" && $2 != "memset" { print $2 }'
+          )"
+          test -z "$fat32_symbols"
+          nm -u build/rust_fat32.obj | grep -Fq "memcpy"
+          nm -u build/rust_fat32.obj | grep -Fq "memset"
           test -z "$(objdump -p build/BOOTX64.EFI | grep 'DLL Name')"
           file build/BOOTX64.EFI
           ls -l build/BOOTX64.EFI
@@ -103,7 +111,7 @@ jobs:
 
       - name: Validate smoke-test transcript
         run: |
-          grep -Fq "ArgusOS UEFI Study Monitor v0.9" qemu.log
+          grep -Fq "ArgusOS UEFI Study Monitor v0.10" qemu.log
           grep -Fq "ARGUS_KERNEL_ONLINE" qemu.log
           grep -Fq "BOOT_SERVICES_EXITED" qemu.log
           grep -Fq "PMM_SELF_TEST_PASS" qemu.log
@@ -116,6 +124,10 @@ jobs:
           grep -Fq "RUST_MODULE_SELF_TEST_PASS" qemu.log
           grep -Fq "RAMFS_ABI_V1_ONLINE" qemu.log
           grep -Fq "RUST_RAMFS_SELF_TEST_PASS" qemu.log
+          grep -Fq "BLOCK_DEVICE_ONLINE" qemu.log
+          grep -Fq "BLOCK_DEVICE_SELF_TEST_PASS" qemu.log
+          grep -Fq "FAT32_ABI_V1_ONLINE" qemu.log
+          grep -Fq "RUST_FAT32_SELF_TEST_PASS" qemu.log
           grep -Fq "GDT_IDT_ONLINE" qemu.log
           grep -Fq "DOUBLE_FAULT_IST_ONLINE" qemu.log
           grep -Fq "APIC_TIMER_TICK" qemu.log
@@ -126,12 +138,19 @@ jobs:
           grep -Fq "MODULES_OK" qemu.log
           grep -Fq "ALLOC_OK" qemu.log
           grep -Fq "rust.ramfs (ABI 1)" qemu.log
+          grep -Fq "rust.fat32 (ABI 1)" qemu.log
           grep -Fq "RAMFS_STATUS_OK" qemu.log
           grep -Fq "RAMFS_LIST_OK" qemu.log
           grep -Fq "ArgusOS Rust RAMFS" qemu.log
           grep -Fq "Rust RAMFS round trip" qemu.log
           grep -Fq "RAMFS_REMOVE_OK" qemu.log
           grep -Fq "RAMFS error: not found" qemu.log
+          grep -Fq "BLOCK_STATUS_OK" qemu.log
+          grep -Fq "FAT32_STATUS_OK" qemu.log
+          grep -Fq "FAT32_LIST_OK" qemu.log
+          grep -Fq "ArgusOS FAT32 via Rust" qemu.log
+          grep -Fq "FAT32_CAT_OK" qemu.log
+          grep -Fq "FAT32 error: not found" qemu.log
 
       - name: Require protected fault paths
         run: |

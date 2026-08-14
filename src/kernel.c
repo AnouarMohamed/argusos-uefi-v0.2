@@ -2,6 +2,8 @@
 #include "acpi.h"
 #include "apic.h"
 #include "arch.h"
+#include "block.h"
+#include "fat32.h"
 #include "heap.h"
 #include "kconsole.h"
 #include "kernel_shell.h"
@@ -76,7 +78,7 @@ void kernel_exception_panic(
 void kernel_main(const boot_info_t *boot_info) {
     kconsole_clear();
 
-    kprint("ArgusOS kernel v0.9\n");
+    kprint("ArgusOS kernel v0.10\n");
     kprint("ARGUS_KERNEL_ONLINE\n");
 
     if (!boot_info || boot_info->magic != ARGUS_BOOT_INFO_MAGIC ||
@@ -160,6 +162,22 @@ void kernel_main(const boot_info_t *boot_info) {
     kprint(" bytes\n");
     if (!ramfs_self_test()) panic("Rust RAMFS self-test failed");
     kprint("RUST_RAMFS_SELF_TEST_PASS\n");
+
+    if (!block_init()) panic("block-device initialization failed");
+    const argus_block_device_v1_t *boot_device = block_default_device();
+    if (!boot_device || !block_self_test()) panic("block-device self-test failed");
+    kprint("BLOCK_DEVICE_ONLINE\nBlock device: ");
+    kprint(boot_device->name);
+    kprint(" (");
+    kprint_dec(boot_device->sector_count);
+    kprint(" sectors)\nBLOCK_DEVICE_SELF_TEST_PASS\n");
+
+    if (!fat32_init(boot_device)) panic("Rust FAT32 mount failed");
+    kprint("FAT32_ABI_V1_ONLINE\nFAT32 reader: ");
+    kprint(fat32_descriptor()->name);
+    kprint("\n");
+    if (!fat32_self_test()) panic("Rust FAT32 self-test failed");
+    kprint("RUST_FAT32_SELF_TEST_PASS\n");
 
     if (!arch_init()) panic("TSS/IDT initialization failed");
     kprint("GDT_IDT_ONLINE\n");

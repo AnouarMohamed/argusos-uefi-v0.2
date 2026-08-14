@@ -1,4 +1,4 @@
-# ArgusOS UEFI Study Kernel v0.9
+# ArgusOS UEFI Study Kernel v0.10
 
 A deliberately small x86-64 UEFI bare-metal study kernel.
 
@@ -46,14 +46,18 @@ kernel with framebuffer and direct COM1 output.
   interrupt-safe queue, with polling retained as a hardware fallback.
 - A bounded Rust RAM filesystem provides a first volatile file namespace with
   checked paths and create, read, enumerate, replace, and remove operations.
+- A C-owned block-device ABI presents sector geometry and checked whole-sector reads.
+- A bounded read-only Rust FAT32 parser validates BPB geometry, enumerates root
+  8.3 entries, and follows FAT chains through the block-device boundary.
 
 ## What is *not* implemented yet?
 
 The pre-boot monitor still uses UEFI keyboard input. The post-boot monitor owns
 its input path, but USB keyboards are not supported yet; physical machines whose
 firmware does not expose a PS/2-compatible keyboard will need an xHCI/USB HID
-driver. There is no persistent disk filesystem, scheduler, userspace, networking,
-or SMP startup.
+driver. The FAT32 device is currently a sparse in-memory fixture rather than a
+physical disk. There is no storage write path, scheduler, userspace, networking,
+mouse/USB HID stack, window system, or SMP startup.
 Runtime Services memory is preserved, but the kernel does not call Runtime
 Services after the handoff.
 
@@ -79,7 +83,9 @@ post-firmware, allocator, paging, guard-page, TSS/IST, APIC-timer, and
 kernel-shell markers. It drives COM1 commands, injects a QEMU hardware key
 sequence through the PS/2 IRQ path, verifies allocator invariants, and performs a
 RAMFS write/read/remove/not-found round trip. Separate negative boots require
-breakpoint, stack-guard page-fault, and double-fault diagnostics.
+breakpoint, stack-guard page-fault, and double-fault diagnostics. The same boot
+also mounts a standards-shaped FAT32 fixture and verifies root listing,
+case-insensitive lookup, file reads, and missing-path handling.
 
 The media creation, OVMF discovery, serial synchronization, and shell probes are
 implemented by `tools/argus.py` instead of inline CI shell/Expect logic.
@@ -160,6 +166,10 @@ ls
 cat /README
 write /notes Rust owns this file
 rm /notes
+disks
+fatinfo
+fatls
+fatcat /HELLO.TXT
 ticks
 input
 irqtest
@@ -183,6 +193,8 @@ src/paging.c    kernel-owned identity page tables and memory attributes
 src/acpi.c      validated RSDP/XSDT/MADT discovery and IRQ overrides
 src/arch.c      GDT, IDT, TSS/IST, exception dispatch, and PIC masking
 src/apic.c      local APIC timer and I/O-APIC interrupt routing
+src/block.h     versioned C-owned block-device descriptor and read contract
+src/block.c     checked block layer and sparse FAT32 memory fixture
 src/serial.c    direct 16550/COM1 output and nonblocking input
 src/ps2.c       IRQ-driven PS/2 decoder, queue, and polling fallback
 src/input.c     unified nonblocking COM1/PS2 input selection
@@ -195,6 +207,9 @@ src/rust_probe.rs bounded no_std checksum module behind ABI v1
 src/ramfs_abi.h versioned C/Rust RAMFS descriptor and status contract
 src/ramfs.c      C-owned RAMFS state, validation, tests, and shell-facing wrapper
 src/rust_ramfs.rs bounded no_std RAMFS path and file-state implementation
+src/fat32_abi.h versioned C/Rust read-only FAT32 parser contract
+src/fat32.c      C-owned FAT32 state, wrapper, and cross-ABI self-tests
+src/rust_fat32.rs bounded no_std BPB, directory, and FAT-chain parser
 src/uefi_memory.c reusable memory-map allocation and validation
 src/gop.c       GOP discovery and raw framebuffer pixel operations
 src/console.c   Argus framebuffer terminal + UEFI text fallback
@@ -204,6 +219,8 @@ Makefile        freestanding PE/COFF build
 tools/argus.py  FAT image creation and interactive QEMU smoke runner
 docs/module-abi-v1.md ownership, layout, failure, and versioning contract
 docs/ramfs-abi-v1.md RAMFS ownership, limits, paths, status, and validation contract
+docs/block-device-abi-v1.md sector ownership, callback, and backend contract
+docs/fat32-abi-v1.md FAT32 layout, ownership, bounds, and failure contract
 ```
 
 ## Language policy
@@ -215,7 +232,7 @@ docs/ramfs-abi-v1.md RAMFS ownership, limits, paths, status, and validation cont
   not part of the boot image.
 - Rust is restricted to bounded `no_std` components behind documented C ABIs.
   It currently owns a stateless checksum and the fixed-capacity RAMFS path/file
-  state machine, with no allocator or hardware access.
+  state machine plus the read-only FAT32 parser, with no allocator or hardware access.
 - Boot, page tables, allocators, interrupt control, and device ownership remain
   in C and x86-64 assembly until a later ABI explicitly and safely exposes them.
 - Do not add languages merely by subsystem count: every language adds a
@@ -313,7 +330,7 @@ Implemented:
 - QEMU control-socket key injection that proves an IRQ-delivered shell command
 - Python negative boots for breakpoint, guard-page, and true double-fault diagnostics
 
-### Stage I — started in v0.9: storage/files
+### Stage I — continued in v0.10: storage/files
 
 Implemented:
 
@@ -323,13 +340,19 @@ Implemented:
 - C-owned aligned opaque state with no ownership transfer across the ABI
 - `fs`, `ls`, `cat`, `write`, and `rm` native-shell commands
 - boot-time exhaustion/bounds/path tests and a QEMU command-level round trip
+- a versioned C block-device interface with checked LBA, count, and buffer bounds
+- a sparse standards-shaped FAT32 fixture with 65,525 data clusters
+- a bounded read-only Rust FAT32 parser behind its own ABI v1
+- BPB, FAT-capacity, cluster, chain-cycle, path, and output-bound validation
+- `disks`, `fatinfo`, `fatls`, and `fatcat` native-shell commands
+- boot and QEMU tests that enumerate and read `/HELLO.TXT`
 
 Recommended next order:
 
-1. C-owned block-device interface with an in-memory fixture
-2. read-only Rust FAT32 parser behind a new bounded parser ABI
-3. AHCI/SATA exploration
-4. NVMe driver
+1. PCI discovery and a real AHCI/SATA read-only block backend
+2. FAT32 subdirectory and long-filename support through ABI v2
+3. NVMe read-only block backend
+4. a write/cache layer only after power-loss and corruption semantics are designed
 
 ### Stage J — processes
 Implement:
@@ -342,6 +365,26 @@ Implement:
 
 At that point ArgusOS is becoming a conventional kernel rather than a firmware monitor.
 
+### Stage K — input and UI groundwork
+
+Implement:
+
+- xHCI discovery and USB HID keyboard/mouse input
+- mouse events, clipping, compositing surfaces, and a framebuffer blitter
+- bitmap/font asset loading through the read-only filesystem
+- a minimal user-space display-server protocol
+
+This is where UI construction starts, but it remains a graphics/input foundation
+rather than a desktop.
+
+### Stage L — C++ windowed UI
+
+C++ enters the build here, after userspace, syscalls, scheduling, input, and file
+loading exist. It will own the user-space window server, retained widget tree,
+layout, controls, and applications. Kernel drivers and ownership boundaries stay
+in C; format parsers and other bounded data components may remain Rust. The first
+visible milestone is a mouse-driven desktop with one terminal window.
+
 ## Exercises
 
 1. Add `cpuid 7` and print AVX2/SMEP/SMAP bits.
@@ -352,7 +395,7 @@ At that point ArgusOS is becoming a conventional kernel rather than a firmware m
 6. Replace the uppercase-only 5x7 glyph set with a complete 8x16 terminal font.
 7. Add command history and cursor editing to the native kernel monitor.
 8. Add directory-aware RAMFS enumeration without changing ABI v1.
-9. Add a read-only FAT32 parser over an in-memory block-device fixture.
+9. Extend the FAT32 reader to one bounded subdirectory level through ABI v2.
 
 ## Important distinction
 
@@ -361,5 +404,6 @@ monitor**. The initial monitor is firmware-backed; the monitor reached through
 `boot` owns its stack, page tables, heap, interrupt handling, console, and input,
 and no longer uses Boot Services. Guard pages and an IST-backed double-fault path
 contain early stack failures, while a volatile Rust RAMFS supplies the first file
-namespace. It is a real kernel boundary, while still being far from a
-general-purpose OS.
+namespace and a read-only Rust parser consumes sectors from the first block-device
+contract. It is a real kernel boundary, while still being far from a
+general-purpose OS or graphical desktop.

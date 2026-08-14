@@ -4,7 +4,7 @@
 #include "gop.h"
 #include "uefi_memory.h"
 
-#define ARGUS_VERSION "0.9"
+#define ARGUS_VERSION "0.10"
 
 static EFI_SYSTEM_TABLE *ST;
 static EFI_SIMPLE_TEXT_INPUT_PROTOCOL *IN;
@@ -272,7 +272,7 @@ static void about(void) {
     print("The post-firmware kernel provides native serial/PS2 input and a heap.\n");
     print("Python owns host tests; bounded no_std Rust components use checked ABIs.\n");
     print("Allocator invariants, guarded stacks, and IRQ input are enforced.\n");
-    print("Stage I starts with a memory-safe Rust RAM filesystem.\n\n");
+    print("Stage I now includes C block devices and a bounded Rust FAT32 reader.\n\n");
 }
 
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
