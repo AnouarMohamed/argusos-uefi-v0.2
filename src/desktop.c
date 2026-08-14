@@ -1,4 +1,5 @@
 #include "desktop.h"
+#include "anonymity.h"
 #include "apic.h"
 #include "app_abi.h"
 #include "compositor.h"
@@ -320,6 +321,22 @@ static void render_system(void) {
     draw_pair(surface, "KEYBOARD", keyboard_state(), row);
     row += line;
     draw_pair(surface, "POINTER", pointer_state(), row);
+    row += line;
+    draw_pair(
+        surface,
+        "SECURITY",
+        process_security_boundaries_online() ? "DEFAULT DENY" : "INVALID",
+        row
+    );
+    row += line;
+    draw_pair(surface, "ANON NET", anonymity_transport_state_name(), row);
+    row += line;
+    draw_pair(
+        surface,
+        "CLEARNET",
+        anonymity_clearnet_allowed() ? "ALLOWED" : "DENIED",
+        row
+    );
 }
 
 static void draw_file_entry(

@@ -1,4 +1,5 @@
 #include "app_runtime.h"
+#include "../src/capability_abi.h"
 #include "../src/user_abi.h"
 
 extern "C" void *memset(void *destination, int value, __SIZE_TYPE__ length) {
@@ -81,6 +82,29 @@ uint64_t syscall2(uint64_t number, uint64_t first, uint64_t second) {
     return result;
 }
 
+uint64_t syscall3(
+    uint64_t number,
+    uint64_t first,
+    uint64_t second,
+    uint64_t third
+) {
+    register uint64_t result __asm__("rax") = number;
+    register uint64_t argument1 __asm__("rdi") = first;
+    register uint64_t argument2 __asm__("rsi") = second;
+    register uint64_t argument3 __asm__("rdx") = third;
+    __asm__ volatile(
+        "syscall"
+        : "+a"(result)
+        : "D"(argument1), "S"(argument2), "d"(argument3)
+        : "rcx", "r11", "memory"
+    );
+    return result;
+}
+
+uint64_t capability(argus_capability_type_t type, uint16_t rights) {
+    return syscall2(ARGUS_SYSCALL_CAPABILITY_QUERY, type, rights);
+}
+
 uint8_t glyph_row(char character, uint32_t row) {
     if (row >= 7u) return 0;
     if (character >= 'a' && character <= 'z')
@@ -96,11 +120,25 @@ uint8_t glyph_row(char character, uint32_t row) {
 namespace argus {
 
 uint64_t pid() { return syscall0(ARGUS_SYSCALL_GETPID); }
-uint64_t ticks() { return syscall0(ARGUS_SYSCALL_CLOCK_TICKS); }
-uint64_t input_poll() { return syscall0(ARGUS_SYSCALL_INPUT_POLL); }
+uint64_t ticks() {
+    return syscall1(
+        ARGUS_SYSCALL_CLOCK_TICKS,
+        capability(ARGUS_CAPABILITY_CLOCK, ARGUS_CAP_RIGHT_READ)
+    );
+}
+uint64_t input_poll() {
+    return syscall1(
+        ARGUS_SYSCALL_INPUT_POLL,
+        capability(ARGUS_CAPABILITY_INPUT, ARGUS_CAP_RIGHT_READ)
+    );
+}
 void yield() { (void)syscall0(ARGUS_SYSCALL_YIELD); }
 void wait_until(uint64_t deadline) {
-    (void)syscall1(ARGUS_SYSCALL_EVENT_WAIT, deadline);
+    (void)syscall2(
+        ARGUS_SYSCALL_EVENT_WAIT,
+        capability(ARGUS_CAPABILITY_INPUT, ARGUS_CAP_RIGHT_WAIT),
+        deadline
+    );
 }
 void wait_for_input() { wait_until(UINT64_MAX); }
 [[noreturn]] void exit(uint64_t status) {
@@ -115,10 +153,11 @@ bool present(uint32_t sequence) {
         sequence,
         0u,
     };
-    return syscall2(
+    return syscall3(
         ARGUS_SYSCALL_APP_PRESENT,
         reinterpret_cast<uint64_t>(&request),
-        sizeof(request)
+        sizeof(request),
+        capability(ARGUS_CAPABILITY_SURFACE, ARGUS_CAP_RIGHT_PRESENT)
     ) == 0u;
 }
 

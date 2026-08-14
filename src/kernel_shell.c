@@ -1,4 +1,5 @@
 #include "kernel_shell.h"
+#include "anonymity.h"
 #include "apic.h"
 #include "ahci.h"
 #include "block.h"
@@ -73,6 +74,7 @@ static void print_help(void) {
     kconsole_write("  alloc N      allocate, verify, and free N bytes\n");
     kconsole_write("  modules      validated kernel modules\n");
     kconsole_write("  processes    user process and scheduler state\n");
+    kconsole_write("  security     capability and anonymity policy\n");
     kconsole_write("  snake        C++ user game state\n");
     kconsole_write("  userapps     ring-3 application state\n");
     kconsole_write("  appstart N   start snake, calc, or notes\n");
@@ -107,7 +109,7 @@ static void print_status(
     const acpi_info_t *acpi,
     const paging_info_t *paging
 ) {
-    kconsole_write("\nArgusOS kernel v0.19\n");
+    kconsole_write("\nArgusOS kernel v0.20\n");
     kconsole_write("Boot Services: exited\nCPUs: ");
     kconsole_write_dec(acpi->enabled_cpu_count);
     kconsole_write("\nCR3: ");
@@ -179,6 +181,30 @@ static void print_user_apps(void) {
     kconsole_write(process_app_input_count(ARGUS_APP_ID_NOTES)
         ? "\nNOTES_INPUT_OK" : "\nNOTES_INPUT_IDLE");
     kconsole_write("\nAPP_SURFACE_ABI_OK\nUSER_APPS_OK\n");
+}
+
+static void print_security_status(void) {
+    kconsole_write("Security boundary: ");
+    kconsole_write(process_security_boundaries_online()
+        ? "online" : "invalid");
+    kconsole_write("\nCapability policy: default deny");
+    kconsole_write("\nAnonymous transport: ");
+    kconsole_write(anonymity_transport_state_name());
+    kconsole_write(" (fail closed)");
+    kconsole_write("\nClearnet: ");
+    kconsole_write(anonymity_clearnet_allowed() ? "allowed" : "denied");
+    kconsole_write("\nLocal DNS: ");
+    kconsole_write(anonymity_local_dns_allowed() ? "allowed" : "denied");
+    kconsole_write("\nRaw network capabilities: ");
+    kconsole_write_dec(process_raw_network_capability_count());
+    kconsole_write("\nAnonymous stream capabilities: ");
+    kconsole_write_dec(process_anonymous_stream_capability_count());
+    kconsole_write("\nDenied connection attempts: ");
+    kconsole_write_dec(process_network_denial_count());
+    kconsole_write(process_security_boundaries_online() &&
+        anonymity_transport_state() == ARGUS_ANON_TRANSPORT_OFFLINE &&
+        !anonymity_clearnet_allowed() && !anonymity_local_dns_allowed()
+        ? "\nSECURITY_POLICY_OK\n" : "\nSECURITY_POLICY_FAIL\n");
 }
 
 static void app_lifecycle(const char *name, uint32_t operation) {
@@ -538,6 +564,7 @@ static void execute_command(
     }
     else if (strings_equal(line, "snake")) print_snake_status();
     else if (strings_equal(line, "userapps")) print_user_apps();
+    else if (strings_equal(line, "security")) print_security_status();
     else if (starts_with(line, "appstart ")) app_lifecycle(line + 9, 1u);
     else if (starts_with(line, "appstop ")) app_lifecycle(line + 8, 2u);
     else if (starts_with(line, "apprestart ")) app_lifecycle(line + 11, 3u);

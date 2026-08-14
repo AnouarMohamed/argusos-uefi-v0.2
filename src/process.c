@@ -1,8 +1,11 @@
 #include "process.h"
+#include "anonymity.h"
 #include "apic.h"
 #include "app_abi.h"
+#include "capability.h"
 #include "elf_loader.h"
 #include "input_keys.h"
+#include "ipc.h"
 #include "pmm.h"
 #include "serial.h"
 #include "user_abi.h"
@@ -50,6 +53,9 @@ typedef struct {
     uint64_t fault_error;
     uint64_t fault_rip;
     uint64_t fault_address;
+    argus_security_role_t security_role;
+    argus_capability_table_t capabilities;
+    uint64_t ipc_endpoint;
 } process_t;
 
 typedef struct {
@@ -88,10 +94,12 @@ static uint64_t fault_count;
 static uint64_t preemption_count;
 static uint64_t wait_count;
 static uint64_t wakeup_count;
+static uint64_t network_denial_count;
 static int address_spaces_isolated;
 static int scheduler_ready;
 static int process_self_test_passed;
 static int preemption_enabled;
+static int security_boundaries_ready;
 static uint8_t syscall_stack[USER_SYSCALL_STACK_BYTES]
     __attribute__((aligned(16)));
 
@@ -117,8 +125,60 @@ static void zero_page(uint64_t physical) {
     for (uint64_t index = 0; index < ARGUS_PAGE_SIZE; ++index) bytes[index] = 0;
 }
 
+static uint64_t grant_process_capability(
+    process_t *process,
+    argus_capability_type_t type,
+    uint16_t rights,
+    uint64_t object
+) {
+    if (!process) return 0;
+    if ((type == ARGUS_CAPABILITY_ANONYMOUS_STREAM ||
+         type == ARGUS_CAPABILITY_RAW_NETWORK) &&
+        !anonymity_capability_allowed(process->security_role, type, rights))
+        return 0;
+    return capability_grant(&process->capabilities, type, rights, object);
+}
+
+static int process_capability_policy_self_test(void) {
+    process_t candidate = {0};
+    capability_table_init(&candidate.capabilities, 0x53454355u);
+    candidate.security_role = ARGUS_SECURITY_ROLE_UTILITY;
+    if (grant_process_capability(
+            &candidate,
+            ARGUS_CAPABILITY_RAW_NETWORK,
+            ARGUS_CAP_RIGHT_CONNECT,
+            1u) ||
+        grant_process_capability(
+            &candidate,
+            ARGUS_CAPABILITY_ANONYMOUS_STREAM,
+            ARGUS_CAP_RIGHT_CONNECT,
+            2u))
+        return 0;
+    candidate.security_role = ARGUS_SECURITY_ROLE_TOR_TRANSPORT;
+    uint64_t raw = grant_process_capability(
+        &candidate,
+        ARGUS_CAPABILITY_RAW_NETWORK,
+        ARGUS_CAP_RIGHT_CONNECT,
+        3u
+    );
+    if (!raw || !capability_revoke(&candidate.capabilities, raw)) return 0;
+    candidate.security_role = ARGUS_SECURITY_ROLE_BROWSER_NETWORK;
+    uint64_t anonymous = grant_process_capability(
+        &candidate,
+        ARGUS_CAPABILITY_ANONYMOUS_STREAM,
+        ARGUS_CAP_RIGHT_CONNECT,
+        4u
+    );
+    return anonymous && capability_revoke(
+        &candidate.capabilities,
+        anonymous
+    );
+}
+
 static void release_process(process_t *process) {
     if (!process) return;
+    if (process->ipc_endpoint)
+        (void)ipc_endpoint_destroy(process->ipc_endpoint);
     paging_user_space_destroy(&process->address_space);
     for (uint32_t index = 0; index < process->image_page_count; ++index)
         if (process->image_physical[index])
@@ -137,6 +197,8 @@ static int prepare_process(process_t *process, uint64_t pid, uint32_t app_id) {
     *process = (process_t){0};
     process->pid = pid;
     process->app_id = app_id;
+    process->security_role = ARGUS_SECURITY_ROLE_UTILITY;
+    capability_table_init(&process->capabilities, pid);
     if (!paging_user_space_create(kernel_paging, &process->address_space))
         return 0;
     process->stack_virtual = process->address_space.user_base + USER_STACK_OFFSET;
@@ -180,6 +242,31 @@ static int prepare_process(process_t *process, uint64_t pid, uint32_t app_id) {
                 release_process(process);
                 return 0;
             }
+        }
+        process->ipc_endpoint = ipc_endpoint_create(pid);
+        if (!process->ipc_endpoint ||
+            !grant_process_capability(
+                process,
+                ARGUS_CAPABILITY_CLOCK,
+                ARGUS_CAP_RIGHT_READ,
+                0u) ||
+            !grant_process_capability(
+                process,
+                ARGUS_CAPABILITY_INPUT,
+                ARGUS_CAP_RIGHT_READ | ARGUS_CAP_RIGHT_WAIT,
+                app_id) ||
+            !grant_process_capability(
+                process,
+                ARGUS_CAPABILITY_SURFACE,
+                ARGUS_CAP_RIGHT_PRESENT,
+                process->surface_physical) ||
+            !grant_process_capability(
+                process,
+                ARGUS_CAPABILITY_IPC,
+                ARGUS_CAP_RIGHT_RECEIVE,
+                process->ipc_endpoint)) {
+            release_process(process);
+            return 0;
         }
     }
     return 1;
@@ -374,10 +461,14 @@ int process_init(const paging_info_t *kernel_space) {
     preemption_count = 0;
     wait_count = 0;
     wakeup_count = 0;
+    network_denial_count = 0;
     address_spaces_isolated = 0;
     scheduler_ready = 0;
     process_self_test_passed = 0;
     preemption_enabled = 0;
+    security_boundaries_ready = capability_self_test() && ipc_self_test() &&
+        anonymity_policy_self_test() && process_capability_policy_self_test();
+    if (!security_boundaries_ready) return 0;
     for (uint32_t index = 0; index < ARGUS_PROCESS_MAX; ++index)
         processes[index] = (process_t){0};
 
@@ -416,6 +507,47 @@ static int user_range_readable(
         if (page > UINT64_MAX - ARGUS_PAGE_SIZE) return 0;
         page += ARGUS_PAGE_SIZE;
     }
+}
+
+static int user_range_writable(
+    const process_t *process,
+    uint64_t address,
+    uint64_t length
+) {
+    if (!process || !length || address > UINT64_MAX - (length - 1u)) return 0;
+    uint64_t last = address + length - 1u;
+    uint64_t page = address & ~(ARGUS_PAGE_SIZE - 1u);
+    uint64_t last_page = last & ~(ARGUS_PAGE_SIZE - 1u);
+    for (;;) {
+        uint64_t flags = 0;
+        if (!paging_user_translate(&process->address_space, page, 0, &flags) ||
+            !(flags & X86_PAGE_WRITABLE))
+            return 0;
+        if (page == last_page) return 1;
+        if (page > UINT64_MAX - ARGUS_PAGE_SIZE) return 0;
+        page += ARGUS_PAGE_SIZE;
+    }
+}
+
+static int process_capability(
+    const process_t *process,
+    uint64_t handle,
+    argus_capability_type_t type,
+    uint16_t rights,
+    uint64_t expected_object,
+    uint64_t *object
+) {
+    uint64_t resolved = 0;
+    if (!process || !capability_resolve(
+            &process->capabilities,
+            handle,
+            type,
+            rights,
+            &resolved) ||
+        (expected_object != UINT64_MAX && resolved != expected_object))
+        return 0;
+    if (object) *object = resolved;
+    return 1;
 }
 
 static uint64_t app_input_poll(process_t *process) {
@@ -552,14 +684,32 @@ uint64_t syscall_dispatch(arch_user_context_t *context) {
             ++completed_processes;
             return ARCH_USER_ACTION_EXIT;
         case ARGUS_SYSCALL_CLOCK_TICKS:
-            context->rax = process->app_id ? apic_timer_ticks() : UINT64_MAX;
+            context->rax = process->app_id && process_capability(
+                process,
+                context->rdi,
+                ARGUS_CAPABILITY_CLOCK,
+                ARGUS_CAP_RIGHT_READ,
+                0u,
+                0) ? apic_timer_ticks() : UINT64_MAX;
             return ARCH_USER_ACTION_RETURN;
         case ARGUS_SYSCALL_INPUT_POLL:
-            context->rax = process->app_id
-                ? app_input_poll(process) : UINT64_MAX;
+            context->rax = process->app_id && process_capability(
+                process,
+                context->rdi,
+                ARGUS_CAPABILITY_INPUT,
+                ARGUS_CAP_RIGHT_READ,
+                process->app_id,
+                0) ? app_input_poll(process) : UINT64_MAX;
             return ARCH_USER_ACTION_RETURN;
         case ARGUS_SYSCALL_APP_PRESENT: {
             if (!process->app_id ||
+                !process_capability(
+                    process,
+                    context->rdx,
+                    ARGUS_CAPABILITY_SURFACE,
+                    ARGUS_CAP_RIGHT_PRESENT,
+                    process->surface_physical,
+                    0) ||
                 context->rsi != sizeof(argus_app_present_v1_t) ||
                 !user_range_readable(process, context->rdi, context->rsi)) {
                 context->rax = UINT64_MAX;
@@ -582,11 +732,17 @@ uint64_t syscall_dispatch(arch_user_context_t *context) {
             return ARCH_USER_ACTION_RETURN;
         }
         case ARGUS_SYSCALL_EVENT_WAIT: {
-            if (!process->app_id) {
+            if (!process->app_id || !process_capability(
+                    process,
+                    context->rdi,
+                    ARGUS_CAPABILITY_INPUT,
+                    ARGUS_CAP_RIGHT_WAIT,
+                    process->app_id,
+                    0)) {
                 context->rax = UINT64_MAX;
                 return ARCH_USER_ACTION_RETURN;
             }
-            uint64_t deadline = context->rdi;
+            uint64_t deadline = context->rsi;
             uint64_t now = apic_timer_ticks();
             if (process->input_tail != process->input_head ||
                 (deadline != UINT64_MAX && deadline <= now)) {
@@ -599,6 +755,97 @@ uint64_t syscall_dispatch(arch_user_context_t *context) {
             process->state = ARGUS_PROCESS_BLOCKED;
             ++wait_count;
             return ARCH_USER_ACTION_WAIT;
+        }
+        case ARGUS_SYSCALL_CAPABILITY_QUERY: {
+            argus_capability_type_t type =
+                (argus_capability_type_t)context->rdi;
+            context->rax = type > ARGUS_CAPABILITY_NONE &&
+                type <= ARGUS_CAPABILITY_RAW_NETWORK
+                ? capability_find(
+                    &process->capabilities,
+                    type,
+                    (uint16_t)context->rsi) : 0u;
+            return ARCH_USER_ACTION_RETURN;
+        }
+        case ARGUS_SYSCALL_IPC_SEND: {
+            uint64_t endpoint = 0;
+            if (!process_capability(
+                    process,
+                    context->rdi,
+                    ARGUS_CAPABILITY_IPC,
+                    ARGUS_CAP_RIGHT_SEND,
+                    UINT64_MAX,
+                    &endpoint) ||
+                !context->rdx || context->rdx > ARGUS_IPC_MESSAGE_MAX ||
+                !user_range_readable(process, context->rsi, context->rdx) ||
+                !ipc_send(
+                    endpoint,
+                    process->pid,
+                    (const uint8_t *)(uintptr_t)context->rsi,
+                    (uint32_t)context->rdx)) {
+                context->rax = UINT64_MAX;
+                return ARCH_USER_ACTION_RETURN;
+            }
+            context->rax = context->rdx;
+            return ARCH_USER_ACTION_RETURN;
+        }
+        case ARGUS_SYSCALL_IPC_RECEIVE: {
+            uint64_t endpoint = 0;
+            if (!process_capability(
+                    process,
+                    context->rdi,
+                    ARGUS_CAPABILITY_IPC,
+                    ARGUS_CAP_RIGHT_RECEIVE,
+                    process->ipc_endpoint,
+                    &endpoint)) {
+                context->rax = UINT64_MAX;
+                return ARCH_USER_ACTION_RETURN;
+            }
+            if (!ipc_pending(endpoint, process->pid)) {
+                context->rax = 0u;
+                return ARCH_USER_ACTION_RETURN;
+            }
+            if (!context->rdx || context->rdx > ARGUS_IPC_MESSAGE_MAX ||
+                !user_range_writable(process, context->rsi, context->rdx)) {
+                context->rax = UINT64_MAX;
+                return ARCH_USER_ACTION_RETURN;
+            }
+            uint32_t received = 0;
+            uint64_t sender = 0;
+            if (!ipc_receive(
+                    endpoint,
+                    process->pid,
+                    (uint8_t *)(uintptr_t)context->rsi,
+                    (uint32_t)context->rdx,
+                    &received,
+                    &sender)) {
+                context->rax = UINT64_MAX;
+                return ARCH_USER_ACTION_RETURN;
+            }
+            (void)sender;
+            context->rax = received;
+            return ARCH_USER_ACTION_RETURN;
+        }
+        case ARGUS_SYSCALL_ANONYMOUS_CONNECT: {
+            uint64_t object = 0;
+            int capability_valid = process_capability(
+                process,
+                context->rdi,
+                ARGUS_CAPABILITY_ANONYMOUS_STREAM,
+                ARGUS_CAP_RIGHT_CONNECT,
+                UINT64_MAX,
+                &object
+            );
+            (void)object;
+            if (capability_valid)
+                (void)anonymity_connection_allowed(
+                    process->security_role,
+                    ARGUS_CAPABILITY_ANONYMOUS_STREAM,
+                    ARGUS_CAP_RIGHT_CONNECT
+                );
+            ++network_denial_count;
+            context->rax = UINT64_MAX;
+            return ARCH_USER_ACTION_RETURN;
         }
         default:
             context->rax = UINT64_MAX;
@@ -717,14 +964,16 @@ int process_run_self_test(void) {
 
     if (completed_processes != PROCESS_PROBE_COUNT ||
         configured_processes != PROCESS_PROBE_COUNT ||
-        syscall_count != 10u || yield_count != 2u || write_count != 4u ||
+        syscall_count != 12u || yield_count != 2u || write_count != 4u ||
         context_switch_count != 4u)
         return 0;
     for (uint32_t index = 0; index < PROCESS_PROBE_COUNT; ++index)
         if (processes[index].state != ARGUS_PROCESS_EXITED ||
             processes[index].exit_status != 0 || processes[index].yields != 1u)
             return 0;
-    if (!address_spaces_isolated) return 0;
+    if (!address_spaces_isolated || network_denial_count != 2u ||
+        !security_boundaries_ready)
+        return 0;
 
     if (!load_flat_probe(
             &processes[PROCESS_TEST_SLOT],
@@ -790,6 +1039,33 @@ uint64_t process_fault_count(void) { return fault_count; }
 uint64_t process_preemption_count(void) { return preemption_count; }
 uint64_t process_wait_count(void) { return wait_count; }
 uint64_t process_wakeup_count(void) { return wakeup_count; }
+uint64_t process_network_denial_count(void) { return network_denial_count; }
+uint32_t process_raw_network_capability_count(void) {
+    uint32_t count = 0;
+    for (uint32_t index = 0; index < configured_processes; ++index)
+        if (processes[index].state != ARGUS_PROCESS_UNUSED)
+            count += capability_count_type(
+                &processes[index].capabilities,
+                ARGUS_CAPABILITY_RAW_NETWORK
+            );
+    return count;
+}
+uint32_t process_anonymous_stream_capability_count(void) {
+    uint32_t count = 0;
+    for (uint32_t index = 0; index < configured_processes; ++index)
+        if (processes[index].state != ARGUS_PROCESS_UNUSED)
+            count += capability_count_type(
+                &processes[index].capabilities,
+                ARGUS_CAPABILITY_ANONYMOUS_STREAM
+            );
+    return count;
+}
+int process_security_boundaries_online(void) {
+    return security_boundaries_ready && process_self_test_passed &&
+        network_denial_count >= PROCESS_PROBE_COUNT &&
+        !process_raw_network_capability_count() &&
+        !process_anonymous_stream_capability_count();
+}
 int process_address_space_isolated(void) { return address_spaces_isolated; }
 int process_scheduler_online(void) {
     return scheduler_ready && process_self_test_passed && preemption_enabled;

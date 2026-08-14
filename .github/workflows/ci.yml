@@ -49,6 +49,9 @@ jobs:
           test -s build/surface.obj
           test -s build/process.obj
           test -s build/elf_loader.obj
+          test -s build/capability.obj
+          test -s build/ipc.obj
+          test -s build/anonymity.obj
           test -s build/user_snake.o
           test -s build/user_snake.elf
           test -s build/user_calculator.o
@@ -131,7 +134,7 @@ jobs:
 
       - name: Validate smoke-test transcript
         run: |
-          grep -Fq "ArgusOS UEFI Study Monitor v0.19" qemu.log
+          grep -Fq "ArgusOS UEFI Study Monitor v0.20" qemu.log
           grep -Fq "ARGUS_KERNEL_ONLINE" qemu.log
           grep -Fq "BOOT_SERVICES_EXITED" qemu.log
           grep -Fq "PMM_SELF_TEST_PASS" qemu.log
@@ -165,6 +168,9 @@ jobs:
           grep -Fq "TIMER_PREEMPTION_PASS" qemu.log
           grep -Fq "BLOCKING_EVENT_WAIT_ONLINE" qemu.log
           grep -Fq "PREEMPTIVE_SCHEDULER_PASS" qemu.log
+          grep -Fq "CAPABILITY_HANDLES_PASS" qemu.log
+          grep -Fq "BOUNDED_IPC_PASS" qemu.log
+          grep -Fq "ANONYMITY_FAIL_CLOSED_PASS" qemu.log
           grep -Fq "USER_PROCESS_SELF_TEST_PASS" qemu.log
           grep -Fq "CPP_USERSPACE_ONLINE" qemu.log
           grep -Fq "APP_SURFACE_ABI_V1_ONLINE" qemu.log
@@ -197,6 +203,13 @@ jobs:
           grep -Fq "Event waits: " qemu.log
           grep -Fq "C++ apps: 3 (ring 3)" qemu.log
           grep -Fq "USERSPACE_STATUS_OK" qemu.log
+          grep -Fq "Capability policy: default deny" qemu.log
+          grep -Fq "Anonymous transport: offline (fail closed)" qemu.log
+          grep -Fq "Clearnet: denied" qemu.log
+          grep -Fq "Local DNS: denied" qemu.log
+          grep -Fq "Raw network capabilities: 0" qemu.log
+          grep -Fq "Anonymous stream capabilities: 0" qemu.log
+          grep -Fq "SECURITY_POLICY_OK" qemu.log
           grep -Fq "APP_SURFACE_ABI_OK" qemu.log
           grep -Fq "CALCULATOR_INPUT_OK" qemu.log
           grep -Fq "NOTES_INPUT_OK" qemu.log

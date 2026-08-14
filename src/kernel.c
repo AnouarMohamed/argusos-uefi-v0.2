@@ -82,7 +82,7 @@ void kernel_exception_panic(
 void kernel_main(const boot_info_t *boot_info) {
     kconsole_clear();
 
-    kprint("ArgusOS kernel v0.19\n");
+    kprint("ArgusOS kernel v0.20\n");
     kprint("ARGUS_KERNEL_ONLINE\n");
 
     if (!boot_info || boot_info->magic != ARGUS_BOOT_INFO_MAGIC ||
@@ -233,6 +233,8 @@ void kernel_main(const boot_info_t *boot_info) {
     kprint("APIC_TIMER_TICK\n");
 
     if (!process_run_self_test()) panic("user process self-test failed");
+    if (!process_security_boundaries_online())
+        panic("security boundary self-test failed");
     kprint("USER_RING3_ONLINE\n");
     kprint("SYSCALL_SYSRET_ONLINE\n");
     kprint("USER_ADDRESS_SPACE_ISOLATION_PASS\n");
@@ -241,6 +243,9 @@ void kernel_main(const boot_info_t *boot_info) {
     kprint("TIMER_PREEMPTION_PASS\n");
     kprint("BLOCKING_EVENT_WAIT_ONLINE\n");
     kprint("PREEMPTIVE_SCHEDULER_PASS\n");
+    kprint("CAPABILITY_HANDLES_PASS\n");
+    kprint("BOUNDED_IPC_PASS\n");
+    kprint("ANONYMITY_FAIL_CLOSED_PASS\n");
     kprint("USER_PROCESS_SELF_TEST_PASS\n");
     kprint("CPP_USERSPACE_ONLINE\n");
     kprint("APP_SURFACE_ABI_V1_ONLINE\n");

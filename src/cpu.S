@@ -351,6 +351,12 @@ user_probe_start:
     cmp rax, r12
     jne .Luser_probe_fail
 
+    mov eax, 12
+    xor edi, edi
+    syscall
+    cmp rax, -1
+    jne .Luser_probe_fail
+
     mov eax, 1
     lea rdi, [rip + .Luser_started]
     mov esi, 21

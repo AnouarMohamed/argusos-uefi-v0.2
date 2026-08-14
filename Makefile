@@ -21,7 +21,8 @@ USER_CXXFLAGS = -target x86_64-none-elf -std=c++20 -ffreestanding \
 OBJS = build/main.obj build/boot.obj build/kernel.obj build/acpi.obj build/ahci.obj build/apic.obj build/block.obj \
        build/arch.obj build/compositor.obj build/desktop.obj build/heap.obj build/input.obj build/kconsole.obj \
        build/kernel_shell.obj build/memory.obj build/module.obj build/paging.obj build/fat32.obj \
-       build/pci.obj build/pmm.obj build/elf_loader.obj build/process.obj build/ps2.obj build/serial.obj \
+       build/pci.obj build/pmm.obj build/capability.obj build/ipc.obj build/anonymity.obj \
+       build/elf_loader.obj build/process.obj build/ps2.obj build/serial.obj \
        build/ramfs.obj build/surface.obj build/rust_probe.obj build/rust_ramfs.obj build/rust_fat32.obj \
        build/uefi_memory.obj build/cpu.obj build/user_images.obj build/gop.obj build/console.obj build/font5x7.obj
 
@@ -54,7 +55,7 @@ build/block.obj: src/block.c src/block.h | build
 build/compositor.obj: src/compositor.c src/compositor.h src/gop.h src/surface.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-build/desktop.obj: src/desktop.c src/desktop.h src/apic.h src/app_abi.h src/compositor.h src/console.h src/fat32.h src/gop.h src/heap.h src/input.h src/pmm.h src/process.h src/ramfs.h src/surface.h | build
+build/desktop.obj: src/desktop.c src/desktop.h src/anonymity.h src/apic.h src/app_abi.h src/compositor.h src/console.h src/fat32.h src/gop.h src/heap.h src/input.h src/pmm.h src/process.h src/ramfs.h src/surface.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/arch.obj: src/arch.c src/arch.h src/apic.h src/kernel.h | build
@@ -69,7 +70,7 @@ build/input.obj: src/input.c src/input.h src/acpi.h src/ps2.h src/serial.h | bui
 build/kconsole.obj: src/kconsole.c src/kconsole.h src/console.h src/serial.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-build/kernel_shell.obj: src/kernel_shell.c src/kernel_shell.h src/acpi.h src/ahci.h src/apic.h src/block.h src/boot_info.h src/desktop.h src/fat32.h src/fat32_abi.h src/heap.h src/input.h src/kconsole.h src/module.h src/module_abi.h src/paging.h src/pci.h src/pmm.h src/process.h src/ramfs.h src/ramfs_abi.h src/serial.h | build
+build/kernel_shell.obj: src/kernel_shell.c src/kernel_shell.h src/anonymity.h src/acpi.h src/ahci.h src/apic.h src/block.h src/boot_info.h src/desktop.h src/fat32.h src/fat32_abi.h src/heap.h src/input.h src/kconsole.h src/module.h src/module_abi.h src/paging.h src/pci.h src/pmm.h src/process.h src/ramfs.h src/ramfs_abi.h src/serial.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/memory.obj: src/memory.c | build
@@ -105,10 +106,19 @@ build/pci.obj: src/pci.c src/pci.h | build
 build/pmm.obj: src/pmm.c src/pmm.h src/boot_info.h src/uefi_memory.h src/efi.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
+build/capability.obj: src/capability.c src/capability.h src/capability_abi.h | build
+	$(CLANG) $(CFLAGS) -c $< -o $@
+
+build/ipc.obj: src/ipc.c src/ipc.h | build
+	$(CLANG) $(CFLAGS) -c $< -o $@
+
+build/anonymity.obj: src/anonymity.c src/anonymity.h src/capability.h | build
+	$(CLANG) $(CFLAGS) -c $< -o $@
+
 build/elf_loader.obj: src/elf_loader.c src/elf_loader.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-build/process.obj: src/process.c src/process.h src/apic.h src/app_abi.h src/arch.h src/elf_loader.h src/input_keys.h src/paging.h src/pmm.h src/serial.h src/user_abi.h | build
+build/process.obj: src/process.c src/process.h src/anonymity.h src/apic.h src/app_abi.h src/arch.h src/capability.h src/elf_loader.h src/input_keys.h src/ipc.h src/paging.h src/pmm.h src/serial.h src/user_abi.h | build
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 build/ps2.obj: src/ps2.c src/ps2.h src/acpi.h src/apic.h src/arch.h src/input_keys.h | build
@@ -123,7 +133,7 @@ build/uefi_memory.obj: src/uefi_memory.c src/uefi_memory.h src/efi.h | build
 build/cpu.obj: src/cpu.S | build
 	$(CLANG) -target x86_64-pc-win32-coff -c $< -o $@
 
-build/user_app_runtime.o: user/app_runtime.cpp user/app_runtime.h src/app_abi.h src/user_abi.h | build
+build/user_app_runtime.o: user/app_runtime.cpp user/app_runtime.h src/app_abi.h src/capability_abi.h src/user_abi.h | build
 	$(USER_CXX) $(USER_CXXFLAGS) -c $< -o $@
 
 build/user_snake.o: user/snake.cpp user/app_runtime.h user/snake_game.h src/app_abi.h src/input_keys.h | build

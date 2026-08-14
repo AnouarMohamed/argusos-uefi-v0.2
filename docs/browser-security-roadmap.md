@@ -19,7 +19,8 @@ not a reason to weaken isolation or silently bypass a failed security check.
 
 ### 1. Process and capability base
 
-Status: process isolation is in place; capabilities and IPC remain required.
+Status: process isolation, default-deny capability handles, and bounded IPC are
+in place. Delegation, signed packages, and broker processes remain required.
 
 - validated ELF images and non-writable executable mappings
 - guarded user stacks, contained user faults, blocking waits, and preemption
@@ -103,3 +104,9 @@ time validation, capability IPC, renderer isolation, parser limits, fuzzing, and
 signed updates all have automated negative tests. Local document viewing may ship
 earlier only if it uses the same renderer isolation and cannot obtain a network
 or ambient filesystem capability.
+
+ArgusOS v0.20 additionally enforces an offline anonymity policy: ordinary apps,
+browser UI, and renderers cannot receive raw-network authority; clearnet and local
+DNS are denied; and anonymous connection requests fail unless an isolated Tor
+transport and browser network broker are both ready. See
+`docs/anonymity-boundary-v0.20.md`.

@@ -1,4 +1,4 @@
-# ArgusOS UEFI Study Kernel v0.19
+# ArgusOS UEFI Study Kernel v0.20
 
 A deliberately small x86-64 UEFI bare-metal study kernel.
 
@@ -67,6 +67,12 @@ kernel with framebuffer and direct COM1 output.
   executable images before mapping app pages.
 - App start, stop, and restart operations assign dynamic PIDs and release private
   page tables, image pages, stacks, and shared surfaces.
+- Per-process capability tables enforce explicit rights for clocks, input,
+  waiting, display presentation, IPC, and future network operations.
+- Bounded IPC uses receiver-owned endpoints, fixed queues, 64-byte messages, and
+  stale-handle protection.
+- The anonymity policy is fail closed: clearnet and local DNS are denied, and no
+  current process owns raw-network or anonymous-stream authority.
 - Three persistent freestanding C++20 apps run at ring 3 with no standard library,
   exceptions, RTTI, writable globals, allocator, or direct hardware access.
 - Snake, Calculator, and Notes share a versioned indexed-color surface and focused
@@ -83,11 +89,11 @@ machines whose firmware does not expose a PS/2-compatible keyboard will need an
 xHCI/USB HID driver. Storage currently supports the first 512-byte-sector LBA48
 SATA device on the first discovered AHCI controller, using polling and a one-sector
 DMA bounce buffer. There is no partition-table traversal, AHCI interrupt/NCQ path,
-hotplug, storage write path, general IPC, networking, USB HID stack, user-space
+hotplug, storage write path, capability delegation, networking, USB HID stack, user-space
 display server, or SMP startup. Console, System, Files, and the Applications
 launcher remain kernel-hosted desktop services. App ELF files are validated but
 still embedded in the EFI payload rather than loaded from signed packages. There
-is no web browser: capability IPC, networking, DNS, audited TLS, renderer
+is no web browser: broker processes, networking, DNS, audited TLS, renderer
 isolation, and a bounded document engine must come first.
 Runtime Services memory is preserved, but the kernel does not call Runtime
 Services after the handoff.
@@ -278,6 +284,9 @@ src/font5x7.c   tiny built-in 5x7 terminal font
 src/cpu.S       CPU instructions, stack switch, and interrupt entry stubs
 src/user_images.S embeds separately linked user images in the EFI payload
 src/elf_loader.c strict bounded ELF64 user-image validation
+src/capability.c per-process typed rights and generation-checked handles
+src/ipc.c       receiver-owned fixed endpoint and message queues
+src/anonymity.c fail-closed role and anonymous-transport policy
 user/app_runtime.cpp freestanding syscalls, indexed drawing, font, and number helpers
 user/app.ld     fixed-address image layout and size/storage assertions for all apps
 user/snake.cpp  freestanding persistent C++20 Snake process
@@ -300,6 +309,7 @@ docs/cpp-snake-v0.16.md C++ image, game ABI, input, rendering, and limits
 docs/user-apps-v0.17.md shared app ABI, launcher, applications, and limits
 docs/process-runtime-v0.19.md ELF lifecycle, fault containment, waits, and preemption
 docs/browser-security-roadmap.md mandatory security gates for Internet browsing
+docs/anonymity-boundary-v0.20.md capability, IPC, Tor-role, and fail-closed policy
 PRODUCT.md      product intent, personality, anti-references, and principles
 DESIGN.md       normative ArgusOS desktop tokens and component rules
 ```
@@ -468,7 +478,7 @@ Completed in v0.19:
 - strict ELF loading for the embedded application catalog
 - user exception termination and kernel recovery
 
-General capability IPC remains future work.
+Bounded capability IPC was added in v0.20. Handle delegation remains future work.
 
 This established the first conventional kernel/userspace boundary. Stage M now
 builds a small application runtime on it.
@@ -564,7 +574,21 @@ Implemented:
 - explicit stopped, exited, and faulted window states with no stale app pixels
 - automated boot probes for fault containment, preemption, blocking, and lifecycle
 
-The next platform work is capability-scoped IPC and the network foundation. The
+### Stage P: default-deny service boundary, completed in v0.20
+
+Implemented:
+
+- per-process typed capability handles with fixed rights and revocation generations
+- capability enforcement for app clocks, input, waits, and surface presentation
+- receiver-owned bounded IPC endpoints and checked user-buffer access
+- explicit security roles for browser UI, renderer, network broker, and Tor transport
+- zero network capabilities for current processes and fail-closed connection denial
+- an offline anonymity state machine that cannot jump directly to ready
+- boot and shell checks for forged capabilities, IPC bounds, and network denial
+
+The next platform work is a capability-owned NIC driver and a memory-safe packet
+and TCP service. Arti integration follows only after the required runtime, secure
+randomness, time, storage, TLS provider, and signed update path exist. The
 browser requirements are fixed in `docs/browser-security-roadmap.md`; Internet
 access stays disabled until those security gates are met.
 
