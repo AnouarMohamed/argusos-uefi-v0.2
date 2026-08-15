@@ -1,0 +1,74 @@
+name: "CodeQL Advanced"
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  schedule:
+    - cron: '26 19 * * 3'
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - language: actions
+          build-mode: none
+        - language: c-cpp
+          build-mode: manual
+        - language: python
+          build-mode: none
+        - language: rust
+          build-mode: none
+
+    env:
+      CFLAGS: >-
+        -target x86_64-pc-win32-coff -ffreestanding -fshort-wchar -mno-red-zone
+        -fno-stack-protector -fno-builtin -Wall -Wextra -O2
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v7
+
+    - name: Install Rust module target
+      if: matrix.language == 'rust'
+      run: |
+        rustup toolchain install 1.97.1 --profile minimal \
+          --target x86_64-pc-windows-msvc
+        rustc --version
+
+    - name: Install C/C++ toolchain
+      if: matrix.language == 'c-cpp'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends clang lld binutils
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v4
+      with:
+        languages: ${{ matrix.language }}
+        build-mode: ${{ matrix.build-mode }}
+        # queries: security-extended,security-and-quality
+
+    - name: Run manual build steps
+      if: matrix.build-mode == 'manual'
+      shell: bash
+      run: |
+        make clean
+        make host-check
+        make CFLAGS="$CFLAGS"
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v4
+      with:
+        category: "/language:${{matrix.language}}"
